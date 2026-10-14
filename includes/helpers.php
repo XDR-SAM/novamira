@@ -1425,16 +1425,21 @@ function novamira_build_server_instructions()
  * The agent instructions as Novamira's agent-facing surfaces send them (agent-context,
  * discover-abilities, Chat): the server instructions passed through the
  * novamira_discover_abilities_instructions filter, which adds the skill catalog, the administrator's
- * Context, and extensions' guidance. In read mode the filter is not applied, so agents receive the
- * read-mode guidance alone.
+ * Context, and extensions' guidance. In read mode the filter is not applied. Connection guidance
+ * is included in either mode only for the MCP request that needs it.
  */
 function novamira_agent_instructions(): string
 {
-    if (novamira_is_read_mode()) {
-        return novamira_build_server_instructions();
+    $instructions = novamira_build_server_instructions();
+    if (!novamira_is_read_mode()) {
+        $instructions = (string) apply_filters('novamira_discover_abilities_instructions', $instructions);
     }
 
-    return (string) apply_filters('novamira_discover_abilities_instructions', novamira_build_server_instructions());
+    $connection_notice = function_exists('novamira_legacy_mcp_connection_notice')
+        ? novamira_legacy_mcp_connection_notice()
+        : '';
+
+    return $connection_notice === '' ? $instructions : $connection_notice . "\n\n" . $instructions;
 }
 
 /**
