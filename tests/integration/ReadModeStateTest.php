@@ -111,7 +111,7 @@ final class ReadModeStateTest extends TestCase
         self::assertFalse($result['after_failed_write']);
 
         self::assertSame(
-            ['schema' => 1, 'runtime' => 3, 'option' => 'novamira_read_mode', 'panel_hook' => 'novamira_read_mode_panel'],
+            ['schema' => 1, 'runtime' => 1, 'option' => 'novamira_read_mode', 'panel_hook' => 'novamira_read_mode_panel'],
             $result['constants'],
         );
     }

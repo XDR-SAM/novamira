@@ -36,7 +36,7 @@ const SCHEMA_VERSION = 1;
  * The version of this API (enable(), disable(), status(), the panel hook, the novamira_read_mode_abilities
  * filter); Pro checks it for compatibility.
  */
-const RUNTIME_VERSION = 3;
+const RUNTIME_VERSION = 1;
 
 /** Who changed the state: Novamira Pro, WP-CLI, or Novamira's own Read Mode page. */
 const SOURCES = ['pro', 'cli', 'free-ui'];
