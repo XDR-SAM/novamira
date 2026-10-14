@@ -217,6 +217,11 @@ function context_system_instructions_preview(): string
         return __('System instructions are unavailable until the base Novamira plugin has loaded.', domain: 'novamira');
     }
 
+    // In read mode agents receive the read-mode guidance alone, without the filtered additions.
+    if (function_exists('novamira_is_read_mode') && \novamira_is_read_mode()) {
+        return \novamira_build_server_instructions();
+    }
+
     $previous = instructions_custom_injection_suppression_state(action: 'suppress');
 
     try {

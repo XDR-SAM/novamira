@@ -36,9 +36,13 @@ function novamira_collect_ability_hub_rows(): array
         $groups[novamira_ability_prefix($row['name'])][] = $row;
     }
 
-    $groups = novamira_append_feature_ability_rows($groups, $seen);
-    $groups = novamira_append_disabled_ability_rows($groups, $rules, $seen);
-    $groups = novamira_append_unavailable_wp_cli_rows($groups);
+    // Placeholders for abilities that are not registered are not shown while read mode is on: the list holds
+    // only the read abilities it allows.
+    if (!novamira_is_read_mode()) {
+        $groups = novamira_append_feature_ability_rows($groups, $seen);
+        $groups = novamira_append_disabled_ability_rows($groups, $rules, $seen);
+        $groups = novamira_append_unavailable_wp_cli_rows($groups);
+    }
 
     foreach ($groups as $source => $rows) {
         usort($rows, static fn(array $a, array $b): int => [$a['name']] <=> [$b['name']]);
@@ -53,13 +57,43 @@ function novamira_collect_ability_hub_rows(): array
 }
 
 /**
+ * A hub row for a registered ability. While read mode is on each read ability read mode does not require is
+ * turned off and on by itself, whatever feature owns it, and the ones it requires are shown as such.
+ *
+ * @param array<string, array{disabled: bool}> $rules
+ * @return array{name: string, label: string, description: string, category: string, mcp: string, mcp_type: string, status: string, disabled: bool, individually_manageable: bool, managed_by_feature: bool, infrastructure: bool, manager_kind: string, manager_label: string, manage_url: string}|null
+ */
+function novamira_build_registered_ability_row(WP_Ability $ability, array $rules): ?array
+{
+    $row = novamira_build_registered_ability_row_from_registry($ability, $rules);
+    if ($row === null || !novamira_is_read_mode()) {
+        return $row;
+    }
+
+    // A feature-owned ability is shown as off only when its feature is, which no rule changes.
+    $feature_inactive = !$row['individually_manageable'] && $row['disabled'];
+    $required = novamira_read_mode_is_mandatory_ability($row['name']);
+    $manageable = !$required && !$feature_inactive;
+    $disabled = $feature_inactive || $manageable && ($rules[$row['name']]['disabled'] ?? false);
+
+    return [
+        'status' => $disabled ? __('Disabled', domain: 'novamira') : __('Enabled', domain: 'novamira'),
+        'disabled' => $disabled,
+        'individually_manageable' => $manageable,
+        'managed_by_feature' => false,
+        'infrastructure' => $required,
+        'manager_kind' => $required || $feature_inactive ? $row['manager_kind'] : '',
+    ] + $row;
+}
+
+/**
  * Build a hub row for a registered ability, or null when it is hidden or not exposed.
  *
  * @param array<string, array{disabled: bool}> $rules
  * @return array{name: string, label: string, description: string, category: string, mcp: string, mcp_type: string, status: string, disabled: bool, individually_manageable: bool, managed_by_feature: bool, infrastructure: bool, manager_kind: string, manager_label: string, manage_url: string}|null
  */
 // The row combines registry metadata, feature ownership, direct rules, category lookup, and display state.
-function novamira_build_registered_ability_row(WP_Ability $ability, array $rules): ?array
+function novamira_build_registered_ability_row_from_registry(WP_Ability $ability, array $rules): ?array
 {
     $name = $ability->get_name();
     if (novamira_ability_is_hub_hidden($name)) {
@@ -780,6 +814,9 @@ function novamira_render_settings_page()
             </div>
         </div>
         <?php novamira_render_ability_hub_result_notice($result); ?>
+        <?php if (novamira_is_read_mode()) {
+            \Novamira\ReadMode\render_hub_notice();
+        } ?>
         <?php if ($ability_groups === []): ?>
             <div class="notice notice-info"><p><?php esc_html_e(
                 'No abilities are currently registered.',
@@ -1153,7 +1190,9 @@ function novamira_ability_row_management_label(array $ability): ?string
         return null;
     }
     if ($ability['infrastructure']) {
-        return __('Required by Novamira', domain: 'novamira');
+        return novamira_is_read_mode()
+            ? __('Required by Read Mode', domain: 'novamira')
+            : __('Required by Novamira', domain: 'novamira');
     }
     if ($ability['manager_kind'] === 'specialization') {
         return __('Managed by Novamira Pro', domain: 'novamira');

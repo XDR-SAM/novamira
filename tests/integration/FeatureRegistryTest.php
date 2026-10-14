@@ -483,6 +483,7 @@ final class FeatureRegistryTest extends TestCase
                 return $text;
             }
             function did_action(string $hook): int { return $hook === 'init' ? $GLOBALS['init_calls'] : 0; }
+            function novamira_is_read_mode(): bool { return false; }
             function _n(string $single, string $plural, int $number, string $domain = 'default'): string {
                 return $number === 1 ? $single : $plural;
             }

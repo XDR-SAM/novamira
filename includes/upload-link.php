@@ -101,6 +101,12 @@ function novamira_verify_upload_token(string $token): array|WP_Error
  */
 function novamira_handle_signed_upload(WP_REST_Request $request)
 {
+    // Checked first and before the token, so links issued before read mode was turned on are refused
+    // with the read-mode wording even while AI Abilities are also off.
+    if (novamira_is_read_mode()) {
+        return novamira_read_mode_blocked_error('uploading files through an upload link');
+    }
+
     if (!novamira_is_enabled()) {
         return new WP_Error('novamira_disabled', 'Novamira abilities are disabled.', ['status' => 403]);
     }

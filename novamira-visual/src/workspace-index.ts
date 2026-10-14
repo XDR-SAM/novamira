@@ -1605,7 +1605,8 @@ class AgentWorkspace {
 	private getPageTools(page: WorkspacePage): string[] {
 		try {
 			const win = this.getPageWindow(page) as Window & { __novamiraVisualTools?: Record<string, unknown> };
-			return win.__novamiraVisualTools ? Object.keys(win.__novamiraVisualTools).sort() : [];
+			const tools = win.__novamiraVisualTools ? Object.keys(win.__novamiraVisualTools).sort() : [];
+			return tools;
 		} catch {
 			return [];
 		}

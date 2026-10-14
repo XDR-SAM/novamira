@@ -42,6 +42,23 @@ function register_routes(): void
     ]);
 }
 
+/**
+ * Novamira Visual does not work while read mode is on: every backend tool request is refused, whatever the
+ * Ability, with the read-mode wording.
+ */
+function read_mode_refusal(): ?\WP_Error
+{
+    if (
+        !function_exists('novamira_is_read_mode')
+        || !function_exists('novamira_read_mode_blocked_error')
+        || !\novamira_is_read_mode()
+    ) {
+        return null;
+    }
+
+    return \novamira_read_mode_blocked_error('Novamira Visual');
+}
+
 function check_permission(): bool
 {
     // Visual always loads inside the core plugin, so this helper is always
@@ -81,6 +98,15 @@ function ajax_discover(): void
  */
 function discover_data(array $params): array|\WP_Error
 {
+    $refusal = read_mode_refusal();
+    if ($refusal !== null) {
+        return $refusal;
+    }
+
+    if (function_exists('novamira_enforce_read_mode_registry')) {
+        \novamira_enforce_read_mode_registry();
+    }
+
     if (!function_exists('wp_get_abilities')) {
         return abilities_unavailable_error();
     }
@@ -94,6 +120,9 @@ function discover_data(array $params): array|\WP_Error
             continue;
         }
         if (($excluded[$ability->get_name()] ?? false) === true) {
+            continue;
+        }
+        if (function_exists('novamira_read_mode_hides_ability') && \novamira_read_mode_hides_ability($ability)) {
             continue;
         }
 
@@ -138,6 +167,11 @@ function discovery_instructions(): string
 {
     if (!check_permission()) {
         return '';
+    }
+
+    // In read mode agents get the read-mode guidance alone, without extensions' additions.
+    if (function_exists('novamira_is_read_mode') && \novamira_is_read_mode()) {
+        return \novamira_build_server_instructions();
     }
 
     $base = '';
@@ -196,6 +230,15 @@ function ajax_call(): void
  */
 function call_data(array $params): array|\WP_Error
 {
+    $refusal = read_mode_refusal();
+    if ($refusal !== null) {
+        return $refusal;
+    }
+
+    if (function_exists('novamira_enforce_read_mode_registry')) {
+        \novamira_enforce_read_mode_registry();
+    }
+
     $name = is_string($params['name'] ?? null) ? trim($params['name']) : '';
     /** @var array<string, mixed> $args */
     $args = is_array($params['args'] ?? null) ? $params['args'] : [];
@@ -316,7 +359,23 @@ function get_backend_tool(string $name): \WP_Ability|\WP_Error
         return abilities_unavailable_error();
     }
 
+    // Checked at execution time, whatever the registry holds: an Ability registered after the read-mode
+    // sweep is still refused.
+    if (function_exists('novamira_read_mode_unavailable_ability_error')) {
+        $read_mode_error = \novamira_read_mode_unavailable_ability_error($name);
+        if ($read_mode_error !== null) {
+            return $read_mode_error;
+        }
+    }
+
     $ability = \wp_get_ability($name);
+    if ($ability instanceof \WP_Ability && function_exists('novamira_read_mode_ability_refusal')) {
+        $untrusted = \novamira_read_mode_ability_refusal($ability);
+        if ($untrusted !== null) {
+            return $untrusted;
+        }
+    }
+
     $excluded = excluded_backend_abilities();
     if (!$ability instanceof \WP_Ability || !is_public_backend_tool($ability) || ($excluded[$name] ?? false) === true) {
         return new \WP_Error(

@@ -83,6 +83,12 @@ function novamira_create_admin_access_token(
  */
 function novamira_handle_admin_access_exchange(WP_REST_Request $request)
 {
+    // Checked first and before the token is consumed, so links issued before read mode was turned on are
+    // refused with the read-mode wording, even while AI Abilities are also off, and stay unused.
+    if (novamira_is_read_mode()) {
+        return novamira_read_mode_blocked_error('signing in through an admin access link');
+    }
+
     if (!novamira_is_enabled()) {
         return new WP_Error('novamira_disabled', 'Novamira abilities are disabled.', ['status' => 403]);
     }
@@ -155,6 +161,10 @@ function novamira_handle_admin_access_exchange(WP_REST_Request $request)
  */
 function novamira_handle_admin_access_login(WP_REST_Request $request)
 {
+    if (novamira_is_read_mode()) {
+        return novamira_read_mode_blocked_error('signing in through an admin access link');
+    }
+
     if (!novamira_is_enabled()) {
         return new WP_Error('novamira_disabled', 'Novamira abilities are disabled.', ['status' => 403]);
     }

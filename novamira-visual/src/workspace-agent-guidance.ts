@@ -100,8 +100,10 @@ export class WorkspaceAgentGuidance {
 			}>;
 		};
 		const definitions = Array.isArray(win.__novamiraVisualToolDefinitions) ? win.__novamiraVisualToolDefinitions : [];
+		const offered = this.host.getPageTools(page);
 		return definitions
 			.filter((definition) => typeof definition.name === "string")
+			.filter((definition) => offered.includes(definition.name as string))
 			.map((definition) => ({
 				name: definition.name as string,
 				label: typeof definition.label === "string" ? definition.label : undefined,

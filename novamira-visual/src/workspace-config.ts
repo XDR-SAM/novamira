@@ -11,6 +11,9 @@ declare const novamiraVisualWorkspaceData: {
 	visualVersion: string;
 	abilitiesEnabled: boolean;
 	looksProduction: boolean;
+	/** wp_localize_script sends true as "1". */
+	readMode?: boolean | string;
+	readModeMessage?: string;
 	nonce: string;
 };
 

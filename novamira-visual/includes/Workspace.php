@@ -62,12 +62,16 @@ class Workspace
         $logged_in = \is_user_logged_in();
         $can_manage = $logged_in && \novamira_current_user_can_manage();
         $workspace_url = $this->get_workspace_url();
+        $read_mode = self::read_mode_active();
 
         \wp_send_json_success([
             'authenticated' => $can_manage && \novamira_admin_ui_visible(),
             'loggedIn' => $logged_in,
             'canManage' => $can_manage,
             'recoverUrl' => $logged_in ? $workspace_url : \wp_login_url($workspace_url),
+            // A workspace that was open before read mode was turned on learns it here and stops.
+            'readMode' => $read_mode,
+            'readModeMessage' => $read_mode ? \novamira_read_mode_blocked_message('Novamira Visual') : '',
         ]);
     }
 
@@ -155,6 +159,13 @@ class Workspace
             );
         }
 
+        // Novamira Visual does not work while read mode is on: the workspace is not served, and the page says why.
+        if (self::read_mode_active()) {
+            $this->render_read_mode_page();
+
+            exit();
+        }
+
         $this->enqueue_workspace_assets();
         \wp_enqueue_style('buttons');
 
@@ -175,6 +186,48 @@ class Workspace
         <?php
 
         exit();
+    }
+
+    /** Whether Novamira read mode is on. */
+    private static function read_mode_active(): bool
+    {
+        return (
+            function_exists('novamira_is_read_mode')
+            && function_exists('novamira_read_mode_blocked_message')
+            && \novamira_is_read_mode()
+        );
+    }
+
+    /** What the workspace page shows instead of the workspace while read mode is on. */
+    public function render_read_mode_page(): void
+    {
+        \wp_enqueue_style('buttons');
+        $read_mode_url = function_exists('Novamira\\ReadMode\\page_url') ? \Novamira\ReadMode\page_url() : '';
+
+        ?>
+        <!doctype html>
+        <html <?php \language_attributes(); ?> class="novamira-visual-workspace-document">
+        <head>
+            <meta charset="<?php \bloginfo('charset'); ?>">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title><?php echo \esc_html__('Novamira Visual', domain: 'novamira'); ?></title>
+            <?php \wp_print_styles(); ?>
+        </head>
+        <body class="novamira-visual-workspace-document" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:15vh auto;padding:0 24px;">
+            <h1 style="font-size:20px;font-weight:600;"><?php echo \esc_html__('Novamira Visual is unavailable', domain: 'novamira'); ?></h1>
+            <p><?php echo \esc_html__(
+                'Read Mode is on, so Novamira Visual does not work. Turn off Read Mode to use it again.',
+                domain: 'novamira',
+            ); ?></p>
+            <?php if ($read_mode_url !== ''): ?>
+                <p><a href="<?php echo \esc_url($read_mode_url); ?>" class="button button-primary"><?php echo \esc_html__(
+                    'Go to Read Mode',
+                    domain: 'novamira',
+                ); ?></a></p>
+            <?php endif; ?>
+        </body>
+        </html>
+        <?php
     }
 
     public function redirect_to_login(): void
@@ -202,6 +255,10 @@ class Workspace
 
         $abilities_enabled = function_exists('novamira_is_enabled') && \novamira_is_enabled();
         $looks_production = function_exists('novamira_looks_like_production') && \novamira_looks_like_production();
+        $read_mode =
+            function_exists('novamira_is_read_mode')
+            && function_exists('novamira_read_mode_blocked_message')
+            && \novamira_is_read_mode();
 
         \wp_localize_script('novamira-visual-workspace', object_name: 'novamiraVisualWorkspaceData', l10n: [
             'adminUrl' => \esc_url_raw(\admin_url()),
@@ -219,6 +276,9 @@ class Workspace
             'visualVersion' => (string) NOVAMIRA_VISUAL_VERSION,
             'abilitiesEnabled' => $abilities_enabled,
             'looksProduction' => $looks_production,
+            // Read mode state at page load; the workspace refuses page actions and editor tools that write.
+            'readMode' => $read_mode,
+            'readModeMessage' => $read_mode ? \novamira_read_mode_blocked_message('{subject}') : '',
             'nonce' => \wp_create_nonce('wp_rest'),
         ]);
     }

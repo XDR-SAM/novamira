@@ -66,6 +66,10 @@ function novamira_rest_run_ability_permission(): bool|WP_Error
  */
 function novamira_rest_run_ability(WP_REST_Request $request): mixed
 {
+    if (function_exists('novamira_enforce_read_mode_registry')) {
+        novamira_enforce_read_mode_registry();
+    }
+
     if (!function_exists('wp_get_ability')) {
         return new WP_Error(
             'novamira_abilities_api_unavailable',
@@ -81,7 +85,22 @@ function novamira_rest_run_ability(WP_REST_Request $request): mixed
         ]);
     }
 
+    // Checked at execution time, whatever the registry holds: an Ability registered after the read-mode
+    // sweep is still refused.
+    $read_mode_error = function_exists('novamira_read_mode_unavailable_ability_error')
+        ? novamira_read_mode_unavailable_ability_error($ability_name)
+        : null;
+    if ($read_mode_error !== null) {
+        return $read_mode_error;
+    }
+
     $ability = wp_get_ability($ability_name);
+    $untrusted = $ability instanceof WP_Ability && function_exists('novamira_read_mode_ability_refusal')
+        ? novamira_read_mode_ability_refusal($ability)
+        : null;
+    if ($untrusted !== null) {
+        return $untrusted;
+    }
     if (!$ability instanceof WP_Ability) {
         return new WP_Error(
             'novamira_ability_not_found',

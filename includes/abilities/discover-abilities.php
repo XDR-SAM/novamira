@@ -22,6 +22,10 @@ if (!defined('ABSPATH')) {
 /** Keep the MCP Adapter's standard permission for the shared discovery tool. */
 function novamira_discover_abilities_permission(): bool|\WP_Error
 {
+    if (function_exists('novamira_enforce_read_mode_registry')) {
+        novamira_enforce_read_mode_registry();
+    }
+
     if (!is_user_logged_in()) {
         return new \WP_Error('authentication_required', 'User must be authenticated to access this ability');
     }
@@ -38,18 +42,106 @@ function novamira_discover_abilities_permission(): bool|\WP_Error
 /** Apply Novamira metadata visibility to the shared get-ability-info tool. */
 function novamira_get_ability_info_permission(mixed $input = []): bool|\WP_Error
 {
+    if (function_exists('novamira_enforce_read_mode_registry')) {
+        novamira_enforce_read_mode_registry();
+    }
+
     $arguments = is_array($input) ? $input : [];
+    $ability_name = is_string($arguments['ability_name'] ?? null) ? $arguments['ability_name'] : '';
+    $read_mode_error = novamira_get_ability_info_read_mode_error($ability_name);
+    if ($read_mode_error !== null) {
+        return $read_mode_error;
+    }
+
     $adapter_permission = \Novamira\Vendor\WP\MCP\Abilities\GetAbilityInfoAbility::check_permission($arguments);
     if (is_wp_error($adapter_permission) || !$adapter_permission) {
         return $adapter_permission;
     }
 
-    $ability_name = is_string($arguments['ability_name'] ?? null) ? $arguments['ability_name'] : '';
     if (!novamira_current_user_can_view_ability_metadata($ability_name)) {
         return new \WP_Error('insufficient_capability', 'You are not allowed to inspect Novamira ability metadata.');
     }
 
     return true;
+}
+
+/**
+ * Permission for the shared execute-ability tool. In read mode it first refuses a target that is not a
+ * trusted implementation of an allowlisted Ability, with the read-mode wording; otherwise, and outside
+ * read mode, it is the adapter's own check.
+ */
+function novamira_execute_ability_permission(mixed $input = []): bool|\WP_Error
+{
+    $arguments = is_array($input) ? $input : [];
+    if (function_exists('novamira_read_mode_execute_ability_refusal')) {
+        $target = is_string($arguments['ability_name'] ?? null) ? $arguments['ability_name'] : '';
+        $refusal = novamira_read_mode_execute_ability_refusal($target);
+        if ($refusal !== null) {
+            return $refusal;
+        }
+    }
+
+    return \Novamira\Vendor\WP\MCP\Abilities\ExecuteAbilityAbility::check_permission($arguments);
+}
+
+/**
+ * Discover the public tool Abilities and the Novamira instructions. In read mode only trusted
+ * allowlisted Abilities are listed, with the read-mode guidance alone.
+ *
+ * @return array{novamira_instructions: string, abilities: list<array{name: string, label: string, description: string}>}
+ */
+function novamira_execute_discover_abilities(): array
+{
+    if (function_exists('novamira_enforce_read_mode_registry')) {
+        novamira_enforce_read_mode_registry();
+    }
+
+    $ability_list = [];
+    foreach (wp_get_abilities() as $ability) {
+        $meta = $ability->get_meta();
+        if (!($meta['mcp']['public'] ?? false)) {
+            continue;
+        }
+        if (function_exists('novamira_read_mode_hides_ability') && novamira_read_mode_hides_ability($ability)) {
+            continue;
+        }
+        if (($meta['mcp']['type'] ?? 'tool') !== 'tool') {
+            continue;
+        }
+        if (!novamira_current_user_can_view_ability_metadata($ability->get_name())) {
+            continue;
+        }
+        $ability_list[] = [
+            'name' => $ability->get_name(),
+            'label' => $ability->get_label(),
+            'description' => $ability->get_description(),
+        ];
+    }
+
+    $instructions = '';
+    if (novamira_current_user_can_manage()) {
+        $instructions = function_exists('novamira_agent_instructions')
+            ? novamira_agent_instructions()
+            : (string) apply_filters('novamira_discover_abilities_instructions', novamira_build_server_instructions());
+    }
+
+    return [
+        'novamira_instructions' => $instructions,
+        'abilities' => $ability_list,
+    ];
+}
+
+/**
+ * Explain an Ability that read mode removed to a user who manages Novamira. The adapter checks
+ * permission before its result filters run, so its generic "not found" cannot be reworded later.
+ */
+function novamira_get_ability_info_read_mode_error(string $ability_name): ?\WP_Error
+{
+    if (!function_exists('novamira_is_read_mode') || !novamira_is_read_mode() || !novamira_current_user_can_manage()) {
+        return null;
+    }
+
+    return novamira_read_mode_unavailable_ability_error($ability_name);
 }
 
 /** Register get-ability-info with the Novamira metadata visibility check. */
@@ -111,10 +203,7 @@ function novamira_open_execute_ability_parameters(): void
         'category' => $ability->get_category(),
         'input_schema' => $input_schema,
         'output_schema' => $ability->get_output_schema(),
-        'permission_callback' => [
-            \Novamira\Vendor\WP\MCP\Abilities\ExecuteAbilityAbility::class,
-            'check_permission',
-        ],
+        'permission_callback' => 'novamira_execute_ability_permission',
         'execute_callback' => [\Novamira\Vendor\WP\MCP\Abilities\ExecuteAbilityAbility::class, 'execute'],
         'meta' => $ability->get_meta(),
     ]);
@@ -201,39 +290,7 @@ wp_register_ability('novamira-mcp-adapter/discover-abilities', [
         'required' => ['novamira_instructions', 'abilities'],
     ],
     'permission_callback' => 'novamira_discover_abilities_permission',
-    'execute_callback' => static function (): array {
-        $ability_list = [];
-        foreach (wp_get_abilities() as $ability) {
-            $meta = $ability->get_meta();
-            if (!($meta['mcp']['public'] ?? false)) {
-                continue;
-            }
-            if (($meta['mcp']['type'] ?? 'tool') !== 'tool') {
-                continue;
-            }
-            if (!novamira_current_user_can_view_ability_metadata($ability->get_name())) {
-                continue;
-            }
-            $ability_list[] = [
-                'name' => $ability->get_name(),
-                'label' => $ability->get_label(),
-                'description' => $ability->get_description(),
-            ];
-        }
-
-        $instructions = '';
-        if (novamira_current_user_can_manage()) {
-            $instructions = (string) apply_filters(
-                'novamira_discover_abilities_instructions',
-                novamira_build_server_instructions(),
-            );
-        }
-
-        return [
-            'novamira_instructions' => $instructions,
-            'abilities' => $ability_list,
-        ];
-    },
+    'execute_callback' => 'novamira_execute_discover_abilities',
     'meta' => [
         'annotations' => [
             'readonly' => true,

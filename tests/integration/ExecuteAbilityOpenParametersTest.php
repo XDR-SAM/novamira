@@ -23,7 +23,13 @@ final class ExecuteAbilityOpenParametersTest extends TestCase
         self::assertSame(1, $result['execute_ability_count']);
         self::assertTrue($result['ability_name_unchanged']);
         self::assertTrue($result['required_unchanged']);
-        self::assertTrue($result['permission_callback_unchanged']);
+        // Novamira's wrapper adds the read-mode target check and otherwise returns the adapter's own result;
+        // ReadModeRetainedAbilityTest compares both outside read mode.
+        self::assertSame('novamira_execute_ability_permission', $result['permission_callback']);
+        self::assertSame(
+            [\Novamira\Vendor\WP\MCP\Abilities\ExecuteAbilityAbility::class, 'check_permission'],
+            $result['upstream_permission_callback'],
+        );
         self::assertTrue($result['execute_callback_unchanged']);
         self::assertTrue($result['meta_unchanged']);
         self::assertSame(
@@ -161,8 +167,8 @@ final class ExecuteAbilityOpenParametersTest extends TestCase
                     === $upstream_args['input_schema']['properties']['ability_name'],
                 'required_unchanged' => $patched_args['input_schema']['required']
                     === $upstream_args['input_schema']['required'],
-                'permission_callback_unchanged' => $patched_args['permission_callback']
-                    === $upstream_args['permission_callback'],
+                'permission_callback' => $patched_args['permission_callback'],
+                'upstream_permission_callback' => $upstream_args['permission_callback'],
                 'execute_callback_unchanged' => $patched_args['execute_callback']
                     === $upstream_args['execute_callback'],
                 'meta_unchanged' => $patched_args['meta'] === $upstream_args['meta'],

@@ -1,3 +1,5 @@
+* Tweak: Novamira is now ready for Read Mode, a production ready Novamira Pro feature that lets an AI agent inspect a site without Novamira's write abilities. The new Read Mode page under Novamira and `wp novamira read-mode` show whether it is on and turn it off. While it is on, only read abilities stay available, Novamira Visual does not work, the admin bar says Read Mode, the Abilities Hub lists only the read abilities and the Features page cannot be changed. Read Mode is not a security feature.
+
 v1.12.8 - 2026/10/07
 * Fix: AI Abilities now stay on on sites where a host or plugin rewrites the site address for individual requests, where they previously switched off after being turned on.
 * Fix: The notice shown when AI Abilities switch off because the site domain changed now also appears on the Configuration page, where it was previously hidden.

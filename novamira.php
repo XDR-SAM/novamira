@@ -236,6 +236,8 @@ add_action('network_admin_notices', callback: 'novamira_render_mcp_dependency_no
 add_action('rest_api_init', callback: 'novamira_register_missing_mcp_endpoint', priority: 999);
 
 require_once __DIR__ . '/includes/helpers.php';
+require_once __DIR__ . '/includes/read-mode/policy.php';
+require_once __DIR__ . '/includes/mcp-mirror-server.php';
 require_once __DIR__ . '/includes/ghost-mode/bootstrap.php';
 require_once __DIR__ . '/includes/design-authority.php';
 require_once __DIR__ . '/includes/features/bootstrap.php';
@@ -266,6 +268,7 @@ require_once __DIR__ . '/includes/instructions-admin.php';
 novamira_register_wordpress_compatibility_notice();
 novamira_boot_ability_rest_surface();
 novamira_register_ability_policy_hook();
+novamira_register_read_mode_hooks();
 
 add_action('admin_post_novamira_toggle_ai_abilities', callback: 'novamira_handle_admin_bar_toggle');
 add_action('admin_post_novamira_download_mcpb', callback: 'novamira_handle_download_mcpb');
@@ -394,7 +397,7 @@ function novamira_register_admin_bar_toggle(\WP_Admin_Bar $wp_admin_bar): void
         action: 'novamira_toggle_ai_abilities',
     );
 
-    $wp_admin_bar->add_node([
+    $wp_admin_bar->add_node(\Novamira\ReadMode\admin_bar_node([
         'id' => 'novamira-mcp-status',
         'title' => match (true) {
             $active => esc_html__('Novamira ON', domain: 'novamira'),
@@ -409,7 +412,7 @@ function novamira_register_admin_bar_toggle(\WP_Admin_Bar $wp_admin_bar): void
                 default => 'novamira-mcp-off',
             },
         ],
-    ]);
+    ]));
 
     $wp_admin_bar->add_node([
         'id' => 'novamira-mcp-status-label',
@@ -807,66 +810,6 @@ function novamira_register_oauth_mcp_server(mixed $adapter): void
         name: 'Novamira (OAuth)',
         description: 'OAuth-authenticated Novamira MCP endpoint. Application Password clients use /wp-json/mcp/novamira.',
     );
-}
-
-/**
- * Create an MCP server that mirrors the canonical Novamira server — same tools, resources, and
- * prompts — under a different id and route. Shared by the legacy alias and the OAuth endpoint so
- * neither drifts from the default server's exposed abilities.
- */
-function novamira_create_mirror_mcp_server(
-    \Novamira\Vendor\WP\MCP\Core\McpAdapter $adapter,
-    string $server_id,
-    string $route,
-    string $name,
-    string $description,
-): void {
-    $adapter->create_server(
-        $server_id,
-        'mcp',
-        $route,
-        $name,
-        $description,
-        'v1.0.0',
-        [\Novamira\Vendor\WP\MCP\Transport\HttpTransport::class],
-        \Novamira\Vendor\WP\MCP\Infrastructure\ErrorHandling\ErrorLogMcpErrorHandler::class,
-        \Novamira\Vendor\WP\MCP\Infrastructure\Observability\NullMcpObservabilityHandler::class,
-        [
-            'novamira-mcp-adapter/discover-abilities',
-            'novamira-mcp-adapter/get-ability-info',
-            'novamira-mcp-adapter/execute-ability',
-        ],
-        novamira_discover_public_abilities('resource'),
-        novamira_discover_public_abilities('prompt'),
-    );
-}
-
-/**
- * Replicate DefaultServerFactory::discover_abilities_by_type for reuse on the legacy alias.
- *
- * @return list<string>
- */
-function novamira_discover_public_abilities(string $type): array
-{
-    if (!function_exists('wp_get_abilities')) {
-        return [];
-    }
-
-    $abilities = wp_get_abilities();
-    $filtered = [];
-    foreach ($abilities as $ability) {
-        $meta = $ability->get_meta();
-        if (!($meta['mcp']['public'] ?? false)) {
-            continue;
-        }
-        $ability_type = (string) ($meta['mcp']['type'] ?? 'tool');
-        if ($ability_type !== $type) {
-            continue;
-        }
-        $filtered[] = $ability->get_name();
-    }
-
-    return $filtered;
 }
 
 if ($novamira_adapter_initialized) {

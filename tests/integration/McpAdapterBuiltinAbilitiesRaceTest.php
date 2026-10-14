@@ -77,6 +77,245 @@ final class McpAdapterBuiltinAbilitiesRaceTest extends TestCase
         self::assertSame([], $result['notices'], implode("\n", $result['trace']));
     }
 
+    /**
+     * An adapter init() nested inside wp_abilities_api_init builds the server before the read-mode policy
+     * runs at PHP_INT_MAX. The server keeps the Ability objects it was built from, so in read mode its
+     * resources and prompts must come from the allowlist, not from the public Abilities registered at that
+     * moment, and its tools are the same three meta-tools as outside read mode.
+     */
+    public function testNestedInitInReadModeSnapshotsOnlyAllowedAbilities(): void
+    {
+        $result = $this->runBootScenario('read-mode-init-between');
+
+        self::assertContains('foreign callback: server created=true', $result['trace']);
+        self::assertSame([], $result['resources']);
+        self::assertSame([], $result['prompts']);
+        self::assertSame(self::NOVAMIRA_SERVER_TOOLS, array_keys($result['tools']));
+        foreach (['foreign/write-tool', 'foreign/secret-resource', 'foreign/write-prompt'] as $blocked) {
+            self::assertNotContains($blocked, $result['registered_after_policy']);
+        }
+        self::assertNotContains('foreign ability executed', $result['trace']);
+        self::assertSame([], $result['notices'], implode("\n", $result['trace']));
+    }
+
+    /**
+     * WordPress runs callbacks of the same priority in the order they were added. The policy sweep is
+     * therefore appended to PHP_INT_MAX while the action runs, after a provider that a plugin loaded after
+     * Novamira attached there statically.
+     */
+    public function testReadModeSweepRunsAfterALateMaximumPriorityProvider(): void
+    {
+        $result = $this->runBootScenario('read-mode-late-provider');
+
+        $provider = array_search('late provider registers late/write', $result['trace'], strict: true);
+        $sweep = array_search('policy sweep', $result['trace'], strict: true);
+        self::assertIsInt($provider);
+        self::assertIsInt($sweep);
+        self::assertGreaterThan($provider, $sweep);
+        self::assertContains('unregister late/write', $result['trace']);
+        self::assertNotContains('late/write', $result['registered_after_policy']);
+        self::assertContains('novamira/read-query', $result['registered_after_policy']);
+        self::assertSame(self::NOVAMIRA_SERVER_TOOLS, array_keys($result['tools']));
+        self::assertSame([], $result['notices'], implode("\n", $result['notices']));
+    }
+
+    public function testLateMaximumPriorityProviderIsUntouchedOutsideReadMode(): void
+    {
+        $result = $this->runBootScenario('late-provider-off');
+
+        self::assertContains('policy sweep', $result['trace']);
+        self::assertContains('late/write', $result['registered_after_policy']);
+        self::assertContains('novamira/execute-php', $result['registered_after_policy']);
+        self::assertNotContains('novamira/read-query', $result['registered_after_policy']);
+        self::assertSame(
+            ['mcp-adapter-discover-abilities', 'mcp-adapter-execute-ability', 'mcp-adapter-get-ability-info'],
+            array_keys($result['tools']),
+        );
+        self::assertSame([], $result['notices'], implode("\n", $result['notices']));
+    }
+
+    /**
+     * A normal priority-10 callback attaches a provider to PHP_INT_MAX while wp_abilities_api_init runs.
+     * The sweep is appended from PHP_INT_MAX - 1, after it, so the write Ability is gone when the action
+     * ends. A provider that still lands after the sweep (attached from PHP_INT_MAX - 1 after Novamira), and
+     * an Ability registered straight into the registry after the action, are removed when any
+     * registry-backed surface is entered, before it lists, checks permissions, or executes.
+     */
+    public function testReadModeSweepsDynamicallyAttachedAndLateAbilitiesAtEverySurface(): void
+    {
+        $result = $this->runBootScenario('read-mode-dynamic-providers');
+
+        self::assertSame(['dynamic' => false, 'escaping' => true], $result['after_action']);
+        $provider = array_search('dynamic provider registers late/dynamic-write', $result['trace'], strict: true);
+        self::assertIsInt($provider);
+        self::assertGreaterThan($provider, array_search('policy sweep', $result['trace'], strict: true));
+
+        foreach (['core_abilities_list', 'core_ability_run', 'mcp_http_route', 'novamira_route', 'mcp_stdio_start', 'discover_abilities', 'get_ability_info_permission'] as $surface) {
+            self::assertFalse($result['surfaces'][$surface]['still_registered'], $surface);
+        }
+        self::assertFalse($result['surfaces']['discover_abilities']['outcome']);
+        self::assertSame('novamira_read_mode', $result['surfaces']['get_ability_info_permission']['outcome']);
+        // Routes that do not read the Ability registry are left alone.
+        self::assertTrue($result['surfaces']['unrelated_route']['still_registered']);
+        self::assertSame(['dynamic' => false, 'escaping' => false], $result['surfaces']['after_all']);
+        self::assertSame([], $result['notices'], implode("\n", $result['notices']));
+    }
+
+    /**
+     * The bundled adapter's tools/call, prompts/get, and resources/read handlers on the canonical server,
+     * a mirror, and a foreign server that snapshotted Abilities registered after the sweep.
+     */
+    /**
+     * A plugin can attach its own list filter at PHP_INT_MAX while the list is being built; in that same
+     * pass WordPress runs it after every callback already attached there, read mode's included. Read mode
+     * checks the final list where the request router returns it, after every filter, so nothing it does
+     * not allow is listed over HTTP. Outside read mode the lists are as before.
+     */
+    public function testListsBuiltWithFiltersAddedDuringThePassShowOnlyWhatReadModeAllows(): void
+    {
+        $on = $this->runBootScenario('read-mode-dynamic-providers')['handlers']['http'];
+        self::assertNull($on['entry']);
+        self::assertSame(
+            [
+                'tools' => ['mcp-adapter-discover-abilities', 'mcp-adapter-get-ability-info', 'mcp-adapter-execute-ability'],
+                'resources' => [],
+                'prompts' => [],
+            ],
+            $on['lists'],
+        );
+
+        $off = $this->runBootScenario('dynamic-providers-off')['handlers']['http'];
+        self::assertSame(
+            [
+                'tools' => ['mcp-adapter-discover-abilities', 'mcp-adapter-get-ability-info', 'mcp-adapter-execute-ability', 'acme-callable', 'acme-added-during-pass'],
+                'resources' => ['late://escaping', 'acme://added-during-pass'],
+                'prompts' => ['late-escaping-prompt', 'acme-added-during-pass'],
+            ],
+            $off['lists'],
+        );
+    }
+
+    public function testReadModeMcpHandlersRefuseAbilitiesOutsideTheAllowlist(): void
+    {
+        $result = $this->runBootScenario('read-mode-dynamic-providers');
+
+        foreach (['novamira', 'novamira-mirror'] as $server_id) {
+            $server = $result['handlers'][$server_id];
+            self::assertIsArray($server, $server_id);
+            self::assertNotContains('late-escaping-write', $server['tool_names'], $server_id);
+            self::assertSame('Tool not found: late-escaping-write', $server['tools_call']['error']['message'], $server_id);
+            self::assertSame('Prompt not found: late-escaping-prompt', $server['prompts_get']['error']['message'], $server_id);
+            self::assertSame('Resource not found: late://escaping', $server['resources_read']['error']['message'], $server_id);
+            self::assertTrue($server['ability_info_blocked']['isError'], $server_id);
+            self::assertStringStartsWith('Read mode is active on this site', $server['ability_info_blocked']['content'][0]['text']);
+            self::assertFalse($server['ability_info_allowed']['isError'] ?? false, $server_id);
+            self::assertStringContainsString('"name":"novamira\\/read-file"', $server['ability_info_allowed']['content'][0]['text']);
+            self::assertSame(0, $server['late_permission_calls'], $server_id);
+            self::assertSame(0, $server['late_executions'], $server_id);
+        }
+
+        // Every MCP entry reconciles each server's components with the trusted allowlist, so a foreign
+        // server that snapshotted late Abilities and a callable-backed tool has nothing left to call, and
+        // a later pre-call filter that tries to undo Novamira's refusal changes nothing.
+        $foreign = $result['handlers']['foreign-snapshot'];
+        self::assertSame(
+            [
+                'tools' => ['late-escaping-write', 'acme-foreign-callable'],
+                'resources' => ['late://escaping'],
+                'prompts' => ['late-escaping-prompt'],
+            ],
+            $result['foreign_components_before'],
+        );
+        self::assertSame([], $foreign['tool_names']);
+        self::assertSame('Tool not found: late-escaping-write', $foreign['tools_call']['error']['message']);
+        self::assertSame('Prompt not found: late-escaping-prompt', $foreign['prompts_get']['error']['message']);
+        self::assertSame('Resource not found: late://escaping', $foreign['resources_read']['error']['message']);
+        self::assertSame('Tool not found: acme-foreign-callable', $foreign['foreign_callable_tool_call']['error']['message']);
+        foreach (['novamira', 'novamira-mirror', 'foreign-snapshot'] as $server_id) {
+            $server = $result['handlers'][$server_id];
+            // A callable-backed tool a later configuration filter added to the default server is not there.
+            self::assertSame('Tool not found: acme-callable', $server['callable_tool_call']['error']['message'], $server_id);
+            self::assertSame(0, $server['late_permission_calls'], $server_id);
+            self::assertSame(0, $server['late_executions'], $server_id);
+            self::assertSame(0, $server['callable_calls'], $server_id);
+        }
+    }
+
+    /**
+     * The MCP tool list is the same with read mode on and off, so clients configured once keep working, and
+     * execute-ability dispatches only to trusted allowlisted Abilities in read mode.
+     */
+    public function testReadModeKeepsTheToolListAndExecuteAbilityRunsOnlyAllowedAbilities(): void
+    {
+        $on = $this->runBootScenario('read-mode-dynamic-providers');
+        $off = $this->runBootScenario('dynamic-providers-off');
+
+        $meta_tools = ['mcp-adapter-discover-abilities', 'mcp-adapter-get-ability-info', 'mcp-adapter-execute-ability'];
+        foreach (['novamira', 'novamira-mirror'] as $server_id) {
+            self::assertSame($meta_tools, $on['handlers'][$server_id]['tool_names'], $server_id);
+            self::assertSame(
+                $meta_tools,
+                array_values(array_intersect($off['handlers'][$server_id]['tool_names'], $meta_tools)),
+                $server_id,
+            );
+
+            $read_query = $on['handlers'][$server_id]['execute_read_query'];
+            self::assertFalse($read_query['isError'] ?? false, $server_id);
+            self::assertTrue($read_query['structuredContent']['success'], $server_id);
+            self::assertSame([['one' => '1']], $read_query['structuredContent']['data']['rows'], $server_id);
+
+            foreach (['execute_php' => 'novamira/execute-php', 'execute_late' => 'late/escaping-write'] as $call => $target) {
+                $refusal = $on['handlers'][$server_id][$call];
+                self::assertTrue($refusal['isError'], $server_id . ' ' . $call);
+                self::assertStringStartsWith(
+                    "Read mode is active on this site, so the ability '{$target}' is unavailable",
+                    $refusal['content'][0]['text'],
+                );
+            }
+        }
+
+        // Outside read mode execute-ability behaves as before: execute-php runs, and read-query, a read-mode
+        // Ability, does not exist.
+        self::assertSame(42, $off['handlers']['novamira']['execute_php']['structuredContent']['data']['return_value']);
+        self::assertSame(
+            "Ability 'novamira/read-query' not found",
+            $off['handlers']['novamira']['execute_read_query']['content'][0]['text'],
+        );
+    }
+
+    public function testDynamicAndLateAbilitiesAreUntouchedOutsideReadMode(): void
+    {
+        $result = $this->runBootScenario('dynamic-providers-off');
+
+        self::assertSame(['dynamic' => true, 'escaping' => true], $result['after_action']);
+        foreach ($result['surfaces'] as $surface => $outcome) {
+            if ($surface === 'after_all') {
+                self::assertSame(['dynamic' => true, 'escaping' => true], $outcome);
+                continue;
+            }
+            self::assertTrue($outcome['still_registered'], $surface);
+        }
+        self::assertTrue($result['surfaces']['discover_abilities']['outcome']);
+        // Only the adapter's own checks apply: the runner's request is not signed in.
+        self::assertSame('authentication_required', $result['surfaces']['get_ability_info_permission']['outcome']);
+
+        $foreign = $result['handlers']['foreign-snapshot'];
+        self::assertFalse($foreign['tools_call']['isError']);
+        self::assertSame(['late-escaping-write', 'acme-foreign-callable'], $foreign['tool_names']);
+        self::assertFalse($foreign['foreign_callable_tool_call']['isError']);
+        self::assertSame(3, $foreign['late_executions']);
+        // The default server keeps the callable-backed tool a configuration filter added.
+        self::assertContains('acme-callable', $result['handlers']['novamira']['tool_names']);
+        self::assertFalse($result['handlers']['novamira']['callable_tool_call']['isError']);
+        self::assertContains('mcp-adapter-execute-ability', $result['handlers']['novamira']['tool_names']);
+        self::assertContains('mcp-adapter-execute-ability', $result['handlers']['novamira-mirror']['tool_names']);
+        // The adapter's own lookups of the read-mode-only read-query, which does not exist outside read mode.
+        self::assertSame(
+            array_fill(0, 2, 'WP_Abilities_Registry::get_registered: Ability "novamira/read-query" not found.'),
+            $result['notices'],
+        );
+    }
+
     public function testDisabledDefaultServerLeavesTheAbilitiesButBuildsNoServer(): void
     {
         $result = $this->runBootScenario('server-disabled');
@@ -206,6 +445,172 @@ final class McpAdapterBuiltinAbilitiesRaceTest extends TestCase
             ],
             $result['ran'],
         );
+    }
+
+    /**
+     * The STDIO server is one long-running process. When read mode is turned on by another process while
+     * it serves (the test rewrites the stored state between calls, as Novamira Pro's web request would),
+     * the next call that reaches read mode ends the session before anything runs, and tells the client to
+     * restart: nothing runs in a mix of both modes. Through the adapter's own StdioServerBridge::serve().
+     */
+    public function testStdioSessionEndsBeforeAnythingRunsWhenReadModeTurnsOn(): void
+    {
+        $session = $this->startStdioSession('0');
+        $trio = ['mcp-adapter-discover-abilities', 'mcp-adapter-get-ability-info', 'mcp-adapter-execute-ability'];
+
+        // Read mode off: lists and writes as without read mode, later plugins' list items included.
+        self::assertSame(
+            [...$trio, 'acme-callable', 'acme-listed-tool', 'acme-added-during-pass'],
+            array_column($session->rpc('tools/list')['result']['tools'], 'name'),
+        );
+        self::assertSame(
+            ['late://escaping', 'acme://listed', 'acme://added-during-pass'],
+            array_column($session->rpc('resources/list')['result']['resources'], 'uri'),
+        );
+        self::assertFalse($session->execute('late/escaping-write')['result']['isError']);
+
+        $session->setState('1');
+        $ended = $session->execute('late/escaping-write');
+        [$exit_code, $rest, $stderr] = $session->finish();
+
+        self::assertSame('notifications/message', $ended['method']);
+        self::assertSame('error', $ended['params']['level']);
+        self::assertStringContainsString('read mode was turned on while this MCP session was running', $ended['params']['data']);
+        self::assertStringContainsString('restart', $ended['params']['data']);
+        self::assertSame('', $rest);
+        self::assertSame(1, $exit_code);
+        self::assertStringContainsString('[Novamira] Novamira read mode was turned on', $stderr);
+        $counters = self::counters($stderr);
+        // Only the call made before read mode turned on reached the ability (three permission checks and
+        // one execution, as a session without the change shows); the call after it reached nothing.
+        self::assertSame(['permission' => 3, 'execute' => 1, 'callable' => 0], $counters['calls']);
+        self::assertContains('late/escaping-write', $counters['registered'], 'The session ended before any sweep.');
+    }
+
+    /**
+     * A session that started in read mode ends when read mode is turned off, so it never keeps serving the
+     * read-mode component set (and read-mode-only abilities) in a session where read mode is off.
+     */
+    public function testStdioSessionEndsWhenReadModeTurnsOff(): void
+    {
+        $session = $this->startStdioSession('1');
+        $trio = ['mcp-adapter-discover-abilities', 'mcp-adapter-get-ability-info', 'mcp-adapter-execute-ability'];
+
+        // Read mode on from the start: later plugins' list items are dropped, including those of a filter
+        // attached while the list is built; read-query runs, writes do not.
+        self::assertSame($trio, array_column($session->rpc('tools/list')['result']['tools'], 'name'));
+        self::assertSame($trio, array_column($session->rpc('tools/list')['result']['tools'], 'name'));
+        self::assertSame([], $session->rpc('resources/list')['result']['resources']);
+        self::assertSame([], $session->rpc('prompts/list')['result']['prompts']);
+        self::assertFalse($session->execute('novamira/read-query', ['sql' => 'SELECT 1 AS one'])['result']['isError']);
+        $refused = $session->execute('late/escaping-write')['result'];
+        self::assertTrue($refused['isError']);
+        self::assertStringContainsString("the ability 'late/escaping-write' is unavailable", $refused['content'][0]['text']);
+
+        $session->setState('0');
+        $ended = $session->rpc('tools/list');
+        [$exit_code, $rest, $stderr] = $session->finish();
+
+        self::assertSame('notifications/message', $ended['method']);
+        self::assertStringContainsString('read mode was turned off while this MCP session was running', $ended['params']['data']);
+        self::assertSame('', $rest);
+        self::assertSame(1, $exit_code);
+        $counters = self::counters($stderr);
+        self::assertSame(0, $counters['calls']['execute']);
+        self::assertContains('novamira/read-query', $counters['registered']);
+    }
+
+    /** A session started after the change runs in the new mode only, and a session without a change ends normally. */
+    public function testStdioSessionsStartCleanInEitherMode(): void
+    {
+        $off = $this->startStdioSession('0');
+        self::assertSame(
+            ['mcp-adapter-discover-abilities', 'mcp-adapter-get-ability-info', 'mcp-adapter-execute-ability', 'acme-callable', 'acme-listed-tool', 'acme-added-during-pass'],
+            array_column($off->rpc('tools/list')['result']['tools'], 'name'),
+        );
+        self::assertSame(
+            ['late-escaping-prompt', 'acme-listed-prompt', 'acme-added-during-pass'],
+            array_column($off->rpc('prompts/list')['result']['prompts'], 'name'),
+        );
+        self::assertTrue($off->execute('novamira/read-query', ['sql' => 'SELECT 1'])['result']['isError']);
+        [$exit_code, $rest, $stderr] = $off->finish();
+        self::assertSame(0, $exit_code, $stderr);
+        self::assertSame('', $rest);
+        self::assertNotContains('novamira/read-query', self::counters($stderr)['registered']);
+        self::assertStringNotContainsString('[Novamira]', $stderr);
+    }
+
+    /** Start the canonical server over STDIO in a child process, with read mode stored as the given value. */
+    private function startStdioSession(string $state): object
+    {
+        $root = dirname(__DIR__, levels: 2);
+        $state_file = (string) tempnam(sys_get_temp_dir(), 'novamira-read-mode-state-');
+        file_put_contents($state_file, $state);
+        $process = proc_open(
+            [PHP_BINARY, $root . '/tests/fixtures/mcp-adapter-boot-runner.php', $root, 'stdio-session'],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+            env_vars: array_merge(getenv(), ['NOVAMIRA_TEST_STATE_FILE' => $state_file]),
+        );
+        self::assertIsResource($process);
+
+        return new class($process, $pipes, $state_file) {
+            private int $id = 0;
+
+            /** @param array<int, resource> $pipes */
+            public function __construct(
+                private mixed $process,
+                private array $pipes,
+                private string $state_file,
+            ) {}
+
+            /** @return array<string, mixed> */
+            public function rpc(string $method, array $params = []): array
+            {
+                $request = ['jsonrpc' => '2.0', 'id' => ++$this->id, 'method' => $method, 'params' => $params];
+                fwrite($this->pipes[0], json_encode($request) . "\n");
+                fflush($this->pipes[0]);
+                $response = json_decode((string) fgets($this->pipes[1]), associative: true);
+                TestCase::assertIsArray($response);
+                return $response;
+            }
+
+            /** @return array<string, mixed> */
+            public function execute(string $ability, array $parameters = []): array
+            {
+                return $this->rpc('tools/call', [
+                    'name' => 'mcp-adapter-execute-ability',
+                    'arguments' => ['ability_name' => $ability, 'parameters' => $parameters],
+                ]);
+            }
+
+            public function setState(string $state): void
+            {
+                file_put_contents($this->state_file, $state);
+            }
+
+            /** @return array{0: int, 1: string, 2: string} Exit code, remaining stdout, stderr. */
+            public function finish(): array
+            {
+                fclose($this->pipes[0]);
+                $rest = (string) stream_get_contents($this->pipes[1]);
+                $stderr = (string) stream_get_contents($this->pipes[2]);
+                fclose($this->pipes[1]);
+                fclose($this->pipes[2]);
+                $exit_code = proc_close($this->process);
+                unlink($this->state_file);
+                return [$exit_code, $rest, $stderr];
+            }
+        };
+    }
+
+    /** @return array{calls: array<string, int>, registered: list<string>} */
+    private static function counters(string $stderr): array
+    {
+        self::assertSame(1, preg_match('/^COUNTERS (.+)$/m', $stderr, $match), $stderr);
+        $counters = json_decode($match[1], associative: true);
+        self::assertIsArray($counters);
+        return $counters;
     }
 
     /** @return array<string, mixed> */

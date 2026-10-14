@@ -72,6 +72,12 @@ function handle_update(): void
     }
     check_admin_referer('novamira_set_feature');
 
+    // Nothing here changes what agents can use while read mode is on, so nothing here is saved.
+    if (\novamira_is_read_mode()) {
+        wp_safe_redirect(admin_url('admin.php?page=' . PAGE_SLUG . '&novamira_result=read_mode'));
+        exit();
+    }
+
     $id = is_string($_POST['feature_id'] ?? null) ? sanitize_text_field(wp_unslash($_POST['feature_id'])) : '';
     $manager = Features\features();
     $definition = $manager->definition($id);
@@ -140,6 +146,13 @@ function render_page(): void
     $notice = match ($result) {
         'updated' => ['success is-dismissible', __('Feature settings updated.', domain: 'novamira')],
         'invalid' => ['error', __('Unknown feature.', domain: 'novamira')],
+        'read_mode' => [
+            'info',
+            __(
+                'Read Mode is on, so features cannot be changed. Turn off Read Mode to change them.',
+                domain: 'novamira',
+            ),
+        ],
         'blocked' => [
             'error',
             __('This feature cannot be enabled until its requirements are available.', domain: 'novamira'),
@@ -160,6 +173,10 @@ function render_page(): void
                 esc_html($notice[1])
             ; ?></p></div>
         <?php endif; ?>
+        <?php \novamira_render_read_mode_management_notice(__(
+            'Read Mode is on, so AI agents can use only read abilities, and many of these features are not available. Features cannot be changed until Read Mode is turned off.',
+            domain: 'novamira',
+        )); ?>
         <?php foreach ($manager->errors() as $error): ?>
             <div class="notice notice-error"><p><?php echo esc_html($error); ?></p></div>
         <?php endforeach; ?>
@@ -246,7 +263,9 @@ function render_row(string $id, Features\Definition $feature, Features\Manager $
                 <input type="hidden" name="novamira_feature_action" value="set" />
                 <input type="hidden" name="feature_id" value="<?php echo esc_attr($id); ?>" />
                 <input type="hidden" name="active" value="<?php echo $active ? '0' : '1'; ?>" />
-                <button type="submit" class="action-btn" <?php disabled(!$impact->applied); ?>><?php echo
+                <button type="submit" class="action-btn" <?php disabled(
+                    !$impact->applied || \novamira_is_read_mode(),
+                ); ?>><?php echo
                     $active ? esc_html__('Disable', domain: 'novamira') : esc_html__('Enable', domain: 'novamira')
                 ; ?></button>
             </form>

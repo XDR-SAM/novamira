@@ -198,6 +198,15 @@ function novamira_register_get_wp_cli_job_ability(): void
  */
 function novamira_run_wp_cli(array $input)
 {
+    // An ability that runs PHP or WP-CLI commands also refuses on its own in read mode, even when it is called
+    // without the registry or a permission check. Every other ability relies on the checks they all share.
+    $read_mode_refusal = function_exists('novamira_read_mode_execution_refusal')
+        ? novamira_read_mode_execution_refusal('novamira/run-wp-cli')
+        : null;
+    if ($read_mode_refusal !== null) {
+        return $read_mode_refusal;
+    }
+
     $raw_args = is_array($input['args'] ?? null) ? $input['args'] : [];
     $args = [];
     /** @var mixed $arg */

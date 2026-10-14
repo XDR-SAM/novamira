@@ -1,4 +1,5 @@
 import { WorkspacePageTools } from "./workspace-page-tools";
+import { assertReadModeAllowsMethod } from "./workspace-read-mode";
 import type { PageInteractionName } from "./workspace-types";
 import {
 	backendToolName,
@@ -56,6 +57,8 @@ export class WorkspaceDispatcher {
 	) {}
 
 	async dispatch(method: string, params: unknown): Promise<unknown> {
+		await assertReadModeAllowsMethod(method);
+
 		switch (method) {
 			case "workspace_status":
 			case "workspace_list_pages":

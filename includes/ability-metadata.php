@@ -87,14 +87,26 @@ function novamira_prevent_restricted_rest_ability_run(mixed $response, mixed $ha
 
     // @mago-expect analysis:mixed-assignment -- Route parameters are untyped until checked below.
     $ability_name = $request['name'];
-    if (!is_string($ability_name) || !str_starts_with($ability_name, 'novamira/')) {
+    if (!is_string($ability_name)) {
         return $response;
     }
-    if (novamira_current_user_can_view_ability_metadata($ability_name)) {
-        return $response;
+    if (
+        str_starts_with($ability_name, 'novamira/') && !novamira_current_user_can_view_ability_metadata($ability_name)
+    ) {
+        return novamira_rest_ability_not_found_error();
     }
 
-    return novamira_rest_ability_not_found_error();
+    return novamira_rest_read_mode_run_error($ability_name) ?? $response;
+}
+
+/** Explain a core Ability run that read mode refuses, for users who manage Novamira. */
+function novamira_rest_read_mode_run_error(string $ability_name): ?WP_Error
+{
+    if (!function_exists('novamira_is_read_mode') || !novamira_is_read_mode() || !novamira_current_user_can_manage()) {
+        return null;
+    }
+
+    return novamira_read_mode_unavailable_ability_error($ability_name);
 }
 
 /** Hide Novamira metadata returned by WordPress core's read-only Abilities REST controllers. */
@@ -268,10 +280,12 @@ function novamira_ability_category_slugs(): array
         'admin-access',
         'code-execution',
         'context',
+        'database',
         'design-system',
         'filesystem',
         'gutenberg',
         'novamira-mcp-adapter',
+        'site-data',
         'skill',
     ];
 

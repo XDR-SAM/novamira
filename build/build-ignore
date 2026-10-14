@@ -24,6 +24,7 @@ package.json
 bun.lock
 tsconfig.json
 novamira-visual/src/**
+novamira-visual/tests/**
 novamira-visual/stubs/**
 novamira-visual/packages/**
 novamira-visual/node_modules/**

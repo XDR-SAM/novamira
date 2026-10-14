@@ -161,10 +161,12 @@ function novamira_register_mcp_adapter_builtin_abilities(): void
  * and the priority-10 / priority-20 runs that follow become no-ops), so the server always sees the
  * three built-ins with Novamira's discover-abilities replacement and patchers applied. What remains
  * uncovered is a server created before this action fires, i.e. by code other than the adapter's own
- * `init()`, which the adapter does not support (create_server() refuses it), and — for such a nested
- * `init()` — the auto-discovered resources and prompts being snapshotted before the higher-priority
- * callbacks of the still-running action, such as the Ability policy, have run. Both are acceptable: the
- * built-in tools, the only thing the reported bug affects, are complete either way.
+ * `init()`, which the adapter does not support (create_server() refuses it). For such a nested `init()`
+ * the server is also built before the higher-priority callbacks of the still-running action, such as
+ * the Ability policy, have run. Outside read mode its auto-discovered resources and prompts are
+ * therefore those public at that instant; in read mode its tools, resources, and prompts are all taken
+ * from the read-mode allowlist (novamira_mcp_server_components()), so a blocked Ability cannot be
+ * snapshotted, and Novamira's executors refuse non-allowlisted Abilities again at execution time.
  */
 function novamira_own_mcp_adapter_builtin_abilities(mixed $adapter): void
 {
@@ -193,6 +195,14 @@ function novamira_own_mcp_adapter_builtin_abilities(mixed $adapter): void
 /**
  * Keep policy enforcement active even when Novamira is disabled so independently registered skill
  * or extension Abilities are removed according to the existing rules.
+ *
+ * The sweep itself is attached from the last priority before PHP_INT_MAX, not at plugin load: callbacks
+ * of the same priority run in the order they were added, so a provider attached at PHP_INT_MAX by a
+ * plugin loaded after Novamira, or by any earlier callback of the running action, would otherwise run
+ * after the sweep and keep its Abilities. What even that cannot order (a provider attached to
+ * PHP_INT_MAX from PHP_INT_MAX - 1 after this callback, or registered straight into the registry
+ * later) is swept again by novamira_enforce_read_mode_registry() at the entry of every registry-backed
+ * surface in read mode.
  */
 function novamira_register_ability_policy_hook(): bool
 {
@@ -200,9 +210,21 @@ function novamira_register_ability_policy_hook(): bool
         return false;
     }
 
-    add_action('wp_abilities_api_init', callback: 'novamira_apply_ability_policy', priority: PHP_INT_MAX);
+    add_action('wp_abilities_api_init', callback: 'novamira_attach_ability_policy_sweep', priority: PHP_INT_MAX - 1);
 
     return true;
+}
+
+/**
+ * Append the Ability policy sweep to PHP_INT_MAX while `wp_abilities_api_init` runs, after every
+ * callback attached there so far, including those attached by earlier priorities of this run.
+ * WordPress takes the callbacks of a priority when it reaches that priority, so the sweep added here
+ * still runs in this pass, last, and only once.
+ */
+function novamira_attach_ability_policy_sweep(): void
+{
+    remove_action('wp_abilities_api_init', callback: 'novamira_apply_ability_policy', priority: PHP_INT_MAX);
+    add_action('wp_abilities_api_init', callback: 'novamira_apply_ability_policy', priority: PHP_INT_MAX);
 }
 
 /**

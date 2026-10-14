@@ -3,6 +3,7 @@ import type { AgentTool } from "./tool-types";
 declare global {
 	interface Window {
 		__novamiraVisualTools?: Record<string, (params?: unknown) => Promise<AgentToolResultLike>>;
+		__novamiraVisualToolProvenance?: { source: string; tools: Record<string, unknown> };
 		__novamiraVisualToolDefinitions?: Array<{
 			name: string;
 			label?: string;
@@ -14,7 +15,11 @@ declare global {
 
 type AgentToolResultLike = Awaited<ReturnType<AgentTool["execute"]>>;
 
-export function exposeTools(tools: AgentTool[]): void {
+/**
+ * Expose editor tools to the Visual workspace. A source tags the tool map, so the workspace can verify
+ * which bundle the tools on a page come from.
+ */
+export function exposeTools(tools: AgentTool[], source?: string): void {
 	const toolMap: Record<string, (params?: unknown) => Promise<AgentToolResultLike>> = {};
 
 	for (const tool of tools) {
@@ -106,6 +111,7 @@ export function exposeTools(tools: AgentTool[]): void {
 	};
 
 	window.__novamiraVisualTools = toolMap;
+	if (source !== undefined) window.__novamiraVisualToolProvenance = { source, tools: toolMap };
 	window.__novamiraVisualToolDefinitions = [
 		...tools.map((tool) => ({
 			name: tool.name,

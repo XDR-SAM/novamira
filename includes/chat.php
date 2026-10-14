@@ -1324,6 +1324,40 @@ function novamira_chat_gutenberg_watch_instruction(array $runtime): string
 }
 
 /**
+ * The Ability a Chat tool call runs, or why it cannot run.
+ *
+ * In read mode the registry is swept first, and the name and the object are checked at execution time
+ * against the allowlist and Novamira's own implementation, whatever the registry holds: an Ability
+ * registered after the read-mode sweep is still refused.
+ */
+function novamira_chat_tool_ability(string $ability_name): WP_Ability|WP_Error
+{
+    if (function_exists('novamira_enforce_read_mode_registry')) {
+        novamira_enforce_read_mode_registry();
+    }
+
+    $read_mode_error = function_exists('novamira_read_mode_unavailable_ability_error')
+        ? novamira_read_mode_unavailable_ability_error($ability_name)
+        : null;
+    if ($read_mode_error !== null) {
+        return $read_mode_error;
+    }
+
+    $ability = function_exists('wp_get_ability') ? wp_get_ability($ability_name) : null;
+    if (!$ability instanceof WP_Ability) {
+        return new WP_Error('novamira_chat_ability_unavailable', __('Ability is not available.', domain: 'novamira'), [
+            'status' => 404,
+        ]);
+    }
+
+    $untrusted = function_exists('novamira_read_mode_ability_refusal')
+        ? novamira_read_mode_ability_refusal($ability)
+        : null;
+
+    return $untrusted ?? $ability;
+}
+
+/**
  * @param array<string, mixed> $session
  * @return array{ability: WP_Ability, ability_name: string, tool_call: array<string, mixed>}|WP_Error
  */
@@ -1331,11 +1365,9 @@ function novamira_chat_prepare_tool_execution(array $session, int $call_index, b
 {
     $tool_call = is_array($session['tool_calls'][$call_index] ?? null) ? $session['tool_calls'][$call_index] : [];
     $ability_name = (string) ($tool_call['ability'] ?? '');
-    $ability = function_exists('wp_get_ability') ? wp_get_ability($ability_name) : null;
-    if (!$ability instanceof WP_Ability) {
-        return new WP_Error('novamira_chat_ability_unavailable', __('Ability is not available.', domain: 'novamira'), [
-            'status' => 404,
-        ]);
+    $ability = novamira_chat_tool_ability($ability_name);
+    if (is_wp_error($ability)) {
+        return $ability;
     }
 
     $risk = is_array($tool_call['risk'] ?? null)
@@ -2100,6 +2132,10 @@ function novamira_chat_normalize_model_selection(string $provider, string $model
  */
 function novamira_chat_discover_tools(): array
 {
+    if (function_exists('novamira_enforce_read_mode_registry')) {
+        novamira_enforce_read_mode_registry();
+    }
+
     if (!function_exists('wp_get_abilities')) {
         return [];
     }
@@ -2117,6 +2153,9 @@ function novamira_chat_discover_tools(): array
             continue;
         }
         if (novamira_chat_is_hidden_tool($ability->get_name())) {
+            continue;
+        }
+        if (function_exists('novamira_read_mode_hides_ability') && novamira_read_mode_hides_ability($ability)) {
             continue;
         }
 
@@ -2665,7 +2704,9 @@ function novamira_chat_server_instructions(): string
     }
 
     /** @var mixed $instructions */
-    $instructions = apply_filters('novamira_discover_abilities_instructions', novamira_build_server_instructions());
+    $instructions = function_exists('novamira_agent_instructions')
+        ? novamira_agent_instructions()
+        : apply_filters('novamira_discover_abilities_instructions', novamira_build_server_instructions());
 
     return is_string($instructions) ? trim($instructions) : '';
 }

@@ -45,5 +45,7 @@ add_action('enqueue_block_editor_assets', static function (): void {
     wp_localize_script('novamira-visual-gutenberg-tools', object_name: 'novamiraVisualData', l10n: [
         'restUrl' => esc_url_raw(rest_url('novamira-visual/v1')),
         'nonce' => wp_create_nonce('wp_rest'),
+        // In read mode the editor exposes only the tools that read editor state.
+        'readMode' => function_exists('novamira_is_read_mode') && \novamira_is_read_mode(),
     ]);
 });

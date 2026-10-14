@@ -239,7 +239,7 @@ final class CompatibilityStartupTest extends TestCase
             $GLOBALS['novamira_test_actions'],
         );
         self::assertContains(
-            ['wp_abilities_api_init', 'novamira_apply_ability_policy', PHP_INT_MAX, 1],
+            ['wp_abilities_api_init', 'novamira_attach_ability_policy_sweep', PHP_INT_MAX - 1, 1],
             $GLOBALS['novamira_test_actions'],
         );
     }

@@ -181,6 +181,12 @@ function forward_to_previous_skill_get(string $agent_slug, ?\WP_Ability $previou
         return ['found' => false];
     }
 
+    // The previous owner was captured before the read-mode policy ran, so the registry cannot remove
+    // it. Read mode allows only this ability's own lookup, never an unaudited provider's callback.
+    if (function_exists('novamira_is_read_mode') && \novamira_is_read_mode()) {
+        return ['found' => false];
+    }
+
     /** @var mixed $forwarded */
     $forwarded = $previous->execute(['slug' => $agent_slug]);
     if (is_wp_error($forwarded)) {
