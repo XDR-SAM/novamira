@@ -38,6 +38,7 @@ namespace {
         'unrelated-option',
         'multiple-writes',
         'early-write',
+        'enable-domain',
         'discovery-request',
         'subdirectory-request',
         'trailing-slash-request',
@@ -57,6 +58,7 @@ namespace {
     $GLOBALS['novamira_hooks'] = [];
     $GLOBALS['novamira_did'] = [];
     $GLOBALS['novamira_options'] = [];
+    $GLOBALS['novamira_options_at_purge'] = [];
     $GLOBALS['novamira_purge_calls'] = [];
     $GLOBALS['novamira_headers'] = [];
     $GLOBALS['novamira_home_url'] = 'https://example.test';
@@ -176,7 +178,7 @@ namespace {
 
     $novamira_scenario = $argv[2];
 
-    if ($novamira_scenario === 'all-caches') {
+    if (in_array($novamira_scenario, ['all-caches', 'enable-domain'], true)) {
         novamira_test_install_caches();
     }
     if ($novamira_scenario === 'subdirectory-request') {
@@ -188,7 +190,10 @@ namespace {
 
     add_action(
         'novamira_purged_discovery_urls',
-        static fn(array $urls) => novamira_test_record('novamira_purged_discovery_urls', $urls),
+        static function (array $urls): void {
+            novamira_test_record('novamira_purged_discovery_urls', $urls);
+            $GLOBALS['novamira_options_at_purge'] = $GLOBALS['novamira_options'];
+        },
     );
 
     $novamira_deferred = false;
@@ -198,13 +203,23 @@ namespace {
         // published their purge API.
         novamira_test_update_option('novamira_ai_abilities_enabled', '1');
         $novamira_deferred = did_action('novamira_purged_discovery_urls') === 0
-            && has_action('plugins_loaded', 'Novamira\\CachePurge\\purge_discovery_urls') !== false;
+            && has_action('shutdown', 'Novamira\\CachePurge\\purge_discovery_urls') !== false;
         novamira_test_install_caches();
     }
 
     do_action('plugins_loaded');
+    $novamira_purged_before_init = did_action('novamira_purged_discovery_urls');
+    // Discovery-request scenarios run init after assigning REQUEST_URI below.
+    if (!str_ends_with($novamira_scenario, '-request')) {
+        do_action('init');
+        do_action('wp_loaded');
+    }
 
     switch ($novamira_scenario) {
+        case 'enable-domain':
+            novamira_test_update_option('novamira_ai_abilities_enabled', '1');
+            novamira_test_update_option('novamira_ai_abilities_domain', 'example.test');
+            break;
         case 'all-caches':
         case 'no-caches':
             novamira_test_update_option('novamira_ai_abilities_enabled', '1');
@@ -239,10 +254,16 @@ namespace {
             break;
     }
 
+    $novamira_purged_before_shutdown = did_action('novamira_purged_discovery_urls');
+    do_action('shutdown');
+
     echo json_encode([
         'purge_events' => did_action('novamira_purged_discovery_urls'),
         'calls' => $GLOBALS['novamira_purge_calls'],
         'deferred_before_plugins_loaded' => $novamira_deferred,
+        'purged_before_init' => $novamira_purged_before_init,
+        'purged_before_shutdown' => $novamira_purged_before_shutdown,
+        'options_at_purge' => $GLOBALS['novamira_options_at_purge'],
         'urls' => \Novamira\CachePurge\discovery_urls(),
         'donotcachepage' => defined('DONOTCACHEPAGE'),
         'litespeed_nocache' => did_action('litespeed_control_set_nocache'),

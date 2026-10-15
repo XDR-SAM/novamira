@@ -23,6 +23,10 @@ final class CachePurgeTest extends TestCase
         'https://example.test/.well-known/oauth-protected-resource/wp-json/mcp/novamira-oauth',
         'https://example.test/.well-known/openid-configuration',
         'https://example.test/.well-known/oauth-authorization-server',
+        'https://example.test/.well-known/oauth-protected-resource/',
+        'https://example.test/.well-known/oauth-protected-resource/wp-json/mcp/novamira-oauth/',
+        'https://example.test/.well-known/openid-configuration/',
+        'https://example.test/.well-known/oauth-authorization-server/',
     ];
 
     private const CACHES = [
@@ -85,8 +89,20 @@ final class CachePurgeTest extends TestCase
         $result = $this->runScenario('early-write');
 
         self::assertTrue($result['deferred_before_plugins_loaded']);
+        self::assertSame(0, $result['purged_before_init']);
         self::assertSame(1, $result['purge_events']);
         self::assertSame(self::DISCOVERY_URLS, $result['calls']['litespeed-cache']);
+    }
+
+    public function testPurgeWaitsUntilBothEnableAndDomainWritesAreComplete(): void
+    {
+        $result = $this->runScenario('enable-domain');
+        self::assertSame(0, $result['purged_before_shutdown']);
+        self::assertSame(1, $result['purge_events']);
+        self::assertSame([
+            'novamira_ai_abilities_enabled' => '1',
+            'novamira_ai_abilities_domain' => 'example.test',
+        ], $result['options_at_purge']);
     }
 
     public function testNoCachePluginMeansNoCallsAndNoError(): void

@@ -4,6 +4,7 @@ Unreleased
 * Fix: Troubleshoot now distinguishes error notices, unexpected responses and cached replies when a connection check fails, instead of pointing every invalid response at a cache or firewall.
 * Fix: Troubleshoot connection checks now avoid failures caused by WordPress displaying error notices in the sign-in metadata.
 * Fix: Troubleshoot and admin notices no longer produce a database error on sites where connection storage has not yet been initialized.
+* Fix: Turning AI Abilities on now clears outdated sign-in responses after the settings finish saving, including addresses with a trailing slash.
 
 v1.12.9 - 2026/10/14
 * Tweak: Novamira is now ready for Read Mode, a production ready Novamira Pro feature that lets an AI agent inspect a site without Novamira's write abilities. It requires Novamira Pro 1.12.0 or newer. The new Read Mode page under Novamira and `wp novamira read-mode` show whether it is on and turn it off. While it is on, only read abilities stay available, Novamira Visual does not work, the admin bar says Read Mode, the Abilities Hub lists only the read abilities and the Features page cannot be changed. Read Mode is not a security feature.

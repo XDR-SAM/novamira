@@ -49,31 +49,19 @@ function maybe_purge_for_option(string $option): void
 }
 
 /**
- * Purge now, or as soon as the cache plugins have registered their hooks.
+ * Purge once at the end of the request, after the settings writes and cache initialization.
  *
- * Cache plugins publish their purge API while their plugin file loads, which is before
- * `plugins_loaded` fires; a write that happens earlier than that would find nothing listening.
- * Later writes — admin, REST, WP-CLI — purge immediately.
- *
- * `did_action()` on the completion hook keeps several writes in the same request (disabling stores
- * `enabled` and deletes `domain`) to a single purge, without any state of our own to reset.
+ * Enabling writes `enabled` and then `domain`. Purging between them lets concurrent requests cache
+ * another 404 while the domain lock is still unset. Shutdown also covers admin-post redirects and
+ * gives caches such as Kinsta (init, priority 5) time to publish their APIs.
  */
 function schedule_purge(): void
 {
-    if (did_action('novamira_purged_discovery_urls') > 0) {
-        return;
-    }
-
     $callback = __NAMESPACE__ . '\\purge_discovery_urls';
-    if (did_action('plugins_loaded') === 0) {
-        if (has_action('plugins_loaded', $callback) === false) {
-            add_action('plugins_loaded', callback: $callback, priority: PHP_INT_MAX);
-        }
-
+    if (did_action('novamira_purged_discovery_urls') > 0 || has_action('shutdown', $callback) !== false) {
         return;
     }
-
-    purge_discovery_urls();
+    add_action('shutdown', callback: $callback, priority: PHP_INT_MAX);
 }
 
 function purge_discovery_urls(): void
@@ -100,7 +88,12 @@ function discovery_urls(): array
 {
     $probes = Discovery\discovery_probes(home_url(), \Novamira\OAuth\resource_identifier());
 
-    return array_values(array_unique(array_column($probes, column_key: 'url')));
+    $urls = array_column($probes, column_key: 'url');
+    // The handler also accepts one trailing slash. Page caches may store it separately.
+    return array_values(array_unique(array_merge($urls, array_map(
+        static fn(string $url): string => $url . '/',
+        $urls,
+    ))));
 }
 
 /**
