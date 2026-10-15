@@ -40,7 +40,11 @@ function regressions(): array
     }
 
     // Site dropped to plain HTTP while OAuth connections are active: the endpoints are gone.
-    if (!\novamira_oauth_transport_allowed() && \Novamira\OAuth\ClientValidation\active_client_count() > 0) {
+    if (
+        !\novamira_oauth_transport_allowed()
+        && get_option('novamira_oauth_schema_version', default_value: false) !== false
+        && \Novamira\OAuth\ClientValidation\active_client_count() > 0
+    ) {
         $found[] = __(
             'This site is no longer served over HTTPS, so the OAuth endpoints are disabled and connected AI clients cannot authenticate anymore.',
             domain: 'novamira',

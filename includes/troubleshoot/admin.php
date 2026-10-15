@@ -95,7 +95,10 @@ function detect_connection_method(): string
     }
 
     if (
-        function_exists('Novamira\\OAuth\\ClientValidation\\active_client_count')
+        // A fresh install has no OAuth tables until abilities are enabled. Existing storage must
+        // still be checked when abilities are off, since its connections may need troubleshooting.
+        get_option('novamira_oauth_schema_version', default_value: false) !== false
+        && function_exists('Novamira\\OAuth\\ClientValidation\\active_client_count')
         && \Novamira\OAuth\ClientValidation\active_client_count() > 0
     ) {
         return 'oauth';
