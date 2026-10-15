@@ -38,7 +38,11 @@ namespace {
         'unrelated-option',
         'multiple-writes',
         'early-write',
+        'init-write',
         'enable-domain',
+        'kinsta-success',
+        'kinsta-failure',
+        'kinsta-unsupported',
         'discovery-request',
         'subdirectory-request',
         'trailing-slash-request',
@@ -62,6 +66,7 @@ namespace {
     $GLOBALS['novamira_purge_calls'] = [];
     $GLOBALS['novamira_headers'] = [];
     $GLOBALS['novamira_home_url'] = 'https://example.test';
+    $GLOBALS['novamira_kinsta_requests'] = [];
 
     function add_action(string $hook, callable|string $callback, int $priority = 10, int $accepted_args = 1): bool
     {
@@ -174,11 +179,17 @@ namespace {
         require_once __DIR__ . '/cache-purge-plugins.php';
 
         $GLOBALS['nginx_purger'] = new NovamiraTestNginxPurger();
+        // Kinsta publishes its global while loading, but its cache objects only exist at init 5.
+        $GLOBALS['kinsta_cache'] = new stdClass();
+        add_action('init', static function (): void {
+            $GLOBALS['kinsta_cache']->kinsta_cache = (object) ['config' => ['immediate_path' => 'https://localhost/kinsta-clear-cache/v2/immediate']];
+            $GLOBALS['kinsta_cache']->kinsta_cache_purge = new NovamiraTestKinstaPurger();
+        }, 5);
     }
 
     $novamira_scenario = $argv[2];
 
-    if (in_array($novamira_scenario, ['all-caches', 'enable-domain'], true)) {
+    if (in_array($novamira_scenario, ['all-caches', 'init-write', 'enable-domain'], true)) {
         novamira_test_install_caches();
     }
     if ($novamira_scenario === 'subdirectory-request') {
@@ -207,12 +218,32 @@ namespace {
         novamira_test_install_caches();
     }
 
+    if ($novamira_scenario === 'init-write') {
+        add_action('init', static function (): void {
+            novamira_test_update_option('novamira_ai_abilities_enabled', '1');
+            novamira_test_update_option('novamira_ai_abilities_domain', 'example.test');
+        }, 1);
+    }
+
     do_action('plugins_loaded');
     $novamira_purged_before_init = did_action('novamira_purged_discovery_urls');
     // Discovery-request scenarios run init after assigning REQUEST_URI below.
     if (!str_ends_with($novamira_scenario, '-request')) {
         do_action('init');
         do_action('wp_loaded');
+    }
+
+    $novamira_successful_caches = [];
+    if (str_starts_with($novamira_scenario, 'kinsta-')) {
+        require_once __DIR__ . '/cache-purge-plugins.php';
+        $GLOBALS['kinsta_cache'] = (object) [
+            'kinsta_cache' => (object) ['config' => ['immediate_path' => 'https://localhost/kinsta-clear-cache/v2/immediate']],
+            'kinsta_cache_purge' => $novamira_scenario === 'kinsta-unsupported' ? new stdClass() : new NovamiraTestKinstaPurger(),
+        ];
+        if ($novamira_scenario === 'kinsta-failure') {
+            $GLOBALS['novamira_kinsta_response'] = ['response_code' => 503, 'error_code' => 0];
+        }
+        $novamira_successful_caches = \Novamira\CachePurge\purge_via_kinsta(\Novamira\CachePurge\discovery_urls()) ? ['kinsta'] : [];
     }
 
     switch ($novamira_scenario) {
@@ -264,6 +295,8 @@ namespace {
         'purged_before_init' => $novamira_purged_before_init,
         'purged_before_shutdown' => $novamira_purged_before_shutdown,
         'options_at_purge' => $GLOBALS['novamira_options_at_purge'],
+        'kinsta_requests' => $GLOBALS['novamira_kinsta_requests'],
+        'successful_caches' => $novamira_successful_caches,
         'urls' => \Novamira\CachePurge\discovery_urls(),
         'donotcachepage' => defined('DONOTCACHEPAGE'),
         'litespeed_nocache' => did_action('litespeed_control_set_nocache'),

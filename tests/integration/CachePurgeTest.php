@@ -38,6 +38,7 @@ final class CachePurgeTest extends TestCase
         'wp-super-cache',
         'nginx-helper',
         'sg-cachepress',
+        'kinsta',
     ];
 
     public function testEnablingInvalidatesEveryDiscoveryUrlOnEveryCache(): void
@@ -92,6 +93,15 @@ final class CachePurgeTest extends TestCase
         self::assertSame(0, $result['purged_before_init']);
         self::assertSame(1, $result['purge_events']);
         self::assertSame(self::DISCOVERY_URLS, $result['calls']['litespeed-cache']);
+        self::assertSame(self::DISCOVERY_URLS, $result['calls']['kinsta']);
+    }
+
+    public function testAnInitWriteWaitsForKinstasPurgerToInitialize(): void
+    {
+        $result = $this->runScenario('init-write');
+        self::assertSame(1, $result['purge_events']);
+        self::assertSame(self::DISCOVERY_URLS, $result['calls']['kinsta']);
+        self::assertCount(1, $result['kinsta_requests']);
     }
 
     public function testPurgeWaitsUntilBothEnableAndDomainWritesAreComplete(): void
@@ -103,6 +113,34 @@ final class CachePurgeTest extends TestCase
             'novamira_ai_abilities_enabled' => '1',
             'novamira_ai_abilities_domain' => 'example.test',
         ], $result['options_at_purge']);
+    }
+
+    public function testKinstaGetsOnlyExactDiscoveryUrlsInOneRequest(): void
+    {
+        $result = $this->runScenario('kinsta-success');
+        self::assertSame(['kinsta'], $result['successful_caches']);
+        self::assertCount(1, $result['kinsta_requests']);
+        $request = $result['kinsta_requests'][0];
+        self::assertSame('https://localhost/kinsta-clear-cache/v2/immediate', $request['endpoint']);
+        $expected = [];
+        foreach (self::DISCOVERY_URLS as $index => $url) {
+            $expected['single|' . $index] = substr($url, strlen('https://'));
+        }
+        self::assertSame($expected, $request['body']);
+    }
+
+    public function testKinstaFailureIsNotReportedAsASuccessfulPurge(): void
+    {
+        $result = $this->runScenario('kinsta-failure');
+        self::assertSame([], $result['successful_caches']);
+        self::assertCount(1, $result['kinsta_requests']);
+    }
+
+    public function testUnsupportedKinstaApiIsSkippedWithoutACall(): void
+    {
+        $result = $this->runScenario('kinsta-unsupported');
+        self::assertSame([], $result['successful_caches']);
+        self::assertSame([], $result['kinsta_requests']);
     }
 
     public function testNoCachePluginMeansNoCallsAndNoError(): void

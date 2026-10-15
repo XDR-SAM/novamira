@@ -46,6 +46,31 @@ namespace {
             novamira_test_record('nginx-helper', $url);
         }
     }
+
+    // Public surface used by Kinsta MU 3.7.0's own Cache_Purge::initiate_purge().
+    final class NovamiraTestKinstaPurger
+    {
+        public function convert_purge_list_to_request(array $list): array
+        {
+            if (($list['group'] ?? []) !== []) {
+                throw new RuntimeException('Discovery must never request a group or site-wide purge.');
+            }
+            $request = [];
+            foreach ($list['single'] as $key => $url) {
+                $request['single|' . $key] = str_replace(['https://', 'http://'], '', $url);
+            }
+            return $request;
+        }
+
+        public function send_cache_purge_request(string $endpoint, array $request): array
+        {
+            $GLOBALS['novamira_kinsta_requests'][] = ['endpoint' => $endpoint, 'body' => $request, 'options' => $GLOBALS['novamira_options']];
+            foreach ($request as $value) {
+                novamira_test_record('kinsta', 'https://' . $value);
+            }
+            return $GLOBALS['novamira_kinsta_response'] ?? ['response_code' => 200, 'error_code' => 0];
+        }
+    }
 }
 
 namespace SiteGround_Optimizer\Supercacher {

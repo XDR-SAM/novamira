@@ -1,5 +1,6 @@
 Unreleased
 * Tweak: AI agents and Novamira HQ can now tell whether Read Mode is on for a site.
+* Tweak: Kinsta sites now let Novamira clear cached sign-in responses when AI Abilities settings change.
 * Fix: Older AI client connections now keep reaching Novamira when another plugin uses the same server address. Agents using the older address also receive the recommended connection URL to share with the user.
 * Fix: Troubleshoot now distinguishes error notices, unexpected responses and cached replies when a connection check fails, instead of pointing every invalid response at a cache or firewall.
 * Fix: Troubleshoot connection checks now avoid failures caused by WordPress displaying error notices in the sign-in metadata.

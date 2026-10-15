@@ -113,7 +113,84 @@ function purge_urls(array $urls): array
         return [];
     }
 
-    return array_merge(purge_via_actions($urls), purge_via_functions($urls), purge_via_objects($urls));
+    return array_merge(
+        purge_via_actions($urls),
+        purge_via_functions($urls),
+        purge_via_objects($urls),
+        purge_via_kinsta($urls) ? ['kinsta'] : [],
+    );
+}
+
+/**
+ * Use the same exact-URL request builder and configured endpoint as Kinsta MU's own post purge
+ * (Cache_Purge::initiate_purge). Do not use its site-wide flush or add permanent custom purge rules.
+ * The global and public methods are present in Kinsta MU 3.7.0; unsupported versions are skipped.
+ *
+ * @param list<string> $urls
+ */
+function purge_via_kinsta(array $urls): bool
+{
+    // @mago-expect lint:no-global -- Kinsta exposes its initialized plugin through this global.
+    // @mago-expect analysis:mixed-assignment -- validated before accessing the optional integration.
+    $plugin = $GLOBALS['kinsta_cache'] ?? null;
+    if (!is_object($plugin) || $urls === []) {
+        return false;
+    }
+    // @mago-expect analysis:mixed-assignment
+    $purger = get_object_vars($plugin)['kinsta_cache_purge'] ?? null;
+    $endpoint = kinsta_purge_endpoint($plugin);
+    if (!is_object($purger) || $endpoint === null) {
+        return false;
+    }
+    return send_kinsta_purge($purger, $endpoint, $urls);
+}
+
+function kinsta_purge_endpoint(object $plugin): ?string
+{
+    // @mago-expect analysis:mixed-assignment
+    $cache = get_object_vars($plugin)['kinsta_cache'] ?? null;
+    if (!is_object($cache)) {
+        return null;
+    }
+    // @mago-expect analysis:mixed-assignment
+    $config = get_object_vars($cache)['config'] ?? null;
+    if (!is_array($config) || !is_string($config['immediate_path'] ?? null) || $config['immediate_path'] === '') {
+        return null;
+    }
+    return $config['immediate_path'];
+}
+
+/** @param list<string> $urls */
+function send_kinsta_purge(object $purger, string $endpoint, array $urls): bool
+{
+    $convert = optional_cache_method($purger, method: 'convert_purge_list_to_request');
+    $send = optional_cache_method($purger, method: 'send_cache_purge_request');
+    if ($convert === null || $send === null) {
+        return false;
+    }
+    // @mago-expect analysis:mixed-assignment -- optional third-party API; result validated below.
+    $request = $convert(['single' => $urls, 'group' => []]);
+    if (!is_array($request) || $request === []) {
+        return false;
+    }
+    // @mago-expect analysis:mixed-assignment -- Kinsta returns cURL result fields, not a WP HTTP response.
+    $response = $send($endpoint, $request);
+    if (!is_array($response) || !is_int($response['response_code'] ?? null)) {
+        return false;
+    }
+    return (
+        ($response['error_code'] ?? null) === 0
+        && $response['response_code'] >= 200
+        && $response['response_code'] < 300
+    );
+}
+
+/** Only callable public methods of an installed cache plugin may be invoked. */
+function optional_cache_method(object $object, string $method): ?callable
+{
+    $callback = [$object, $method];
+    // @mago-expect analysis:less-specific-nested-return-statement -- is_callable validates the dynamic object/method pair.
+    return is_callable($callback) ? $callback : null;
 }
 
 /**
