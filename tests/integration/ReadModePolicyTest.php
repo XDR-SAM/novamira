@@ -369,6 +369,7 @@ final class ReadModePolicyTest extends TestCase
             self::assertStringNotContainsString('INJECTED', $on[$surface], $surface);
         }
         self::assertSame([], $on['agent_context_skills']);
+        self::assertSame(['active' => true], $on['agent_context_read_mode']);
         self::assertSame([], $on['skill_prompts']);
         self::assertSame([], $on['skill_source_loads']);
         self::assertStringNotContainsStringIgnoringCase('skill', $on['agent_context_description']);
@@ -384,6 +385,7 @@ final class ReadModePolicyTest extends TestCase
         }
         self::assertStringContainsString('INJECTED: Visual extension guidance.', $off['visual_instructions']);
         self::assertSame([['slug' => 'demo-skill', 'description' => 'A demo skill.', 'source' => 'test']], $off['agent_context_skills']);
+        self::assertSame(['active' => false], $off['agent_context_read_mode']);
         self::assertSame(['novamira/skill-prompt-demo-skill'], $off['skill_prompts']);
         self::assertSame(['agentic', 'prompt'], $off['skill_source_loads']);
         self::assertSame(

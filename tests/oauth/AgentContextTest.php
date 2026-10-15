@@ -151,6 +151,7 @@ final class AgentContextTest extends TestCase
         self::assertSame('6.9.2', $context['environment']['wordpress_version']);
         self::assertSame(PHP_VERSION, $context['environment']['php_version']);
         self::assertSame('en_US', $context['environment']['locale']);
+        self::assertSame(['active' => false], $context['read_mode']);
         self::assertSame(1, $GLOBALS['novamira_test_skill_source_loads']);
     }
 

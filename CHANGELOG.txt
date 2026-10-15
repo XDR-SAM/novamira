@@ -1,4 +1,5 @@
 Unreleased
+* Tweak: AI agents and Novamira HQ can now tell whether Read Mode is on for a site.
 * Fix: Older AI client connections now keep reaching Novamira when another plugin uses the same server address. Agents using the older address also receive the recommended connection URL to share with the user.
 
 v1.12.9 - 2026/10/14

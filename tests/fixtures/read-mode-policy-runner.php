@@ -424,6 +424,7 @@ namespace {
                 'agent_context_description' => $GLOBALS['abilities']['novamira/agent-context']->get_description(),
                 'agent_context_instructions' => $context['instructions'],
                 'agent_context_skills' => $context['skills'],
+                'agent_context_read_mode' => $context['read_mode'],
                 'discover_instructions' => novamira_execute_discover_abilities()['novamira_instructions'],
                 'chat_instructions' => novamira_chat_server_instructions(),
                 'visual_instructions' => \Novamira\Visual\BackendTools\discovery_instructions(),

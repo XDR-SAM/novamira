@@ -23,8 +23,13 @@ wp_register_ability('novamira/agent-context', [
             'instructions' => ['type' => 'string'],
             'skills' => ['type' => 'array', 'items' => ['type' => 'object']],
             'environment' => ['type' => 'object'],
+            'read_mode' => [
+                'type' => 'object',
+                'properties' => ['active' => ['type' => 'boolean']],
+                'required' => ['active'],
+            ],
         ],
-        'required' => ['server', 'instructions', 'skills', 'environment'],
+        'required' => ['server', 'instructions', 'skills', 'environment', 'read_mode'],
     ],
     'execute_callback' => 'novamira_build_agent_context',
     'permission_callback' => 'novamira_permission_callback',
@@ -46,7 +51,8 @@ wp_register_ability('novamira/agent-context', [
  *     server: array<string, mixed>,
  *     instructions: string,
  *     skills: list<array{slug: string, description: string, source: string}>,
- *     environment: array{wordpress_version: string, php_version: string, locale: string}
+ *     environment: array{wordpress_version: string, php_version: string, locale: string},
+ *     read_mode: array{active: bool}
  * }
  */
 function novamira_build_agent_context(): array
@@ -75,5 +81,7 @@ function novamira_build_agent_context(): array
             'php_version' => PHP_VERSION,
             'locale' => get_locale(),
         ],
+        // Whether read mode is on, for clients such as Novamira HQ: the instructions say so only as translated text.
+        'read_mode' => ['active' => $read_mode],
     ];
 }
