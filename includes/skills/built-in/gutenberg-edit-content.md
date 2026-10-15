@@ -37,6 +37,12 @@ clients use the standalone Block Editor Queue admin page.
 
 - Use `novamira/gutenberg-get-content` for the target. It reads live
   `post_content`, not queued pending specs.
+- Read right before composing the change, and pass the returned
+  `content_hash` as `expected_content_hash` to
+  `novamira/gutenberg-add-pending-change`. If the user edits the page after
+  your read, the change is refused with `gutenberg_target_changed_since_read`
+  instead of overwriting those edits: read the target again and recompose
+  from the current content, keeping the edits.
 - The tree returned by `novamira/gutenberg-get-content` is not a `block_spec`.
   It carries only the attributes stored in each block comment: paragraph and
   heading text, links, image sources and similar values that live in the

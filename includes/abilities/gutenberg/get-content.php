@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
 wp_register_ability('novamira/gutenberg-get-content', [
     'label' => __('Get Gutenberg Content', domain: 'novamira'),
     'description' => __(
-        'Reads the live saved Gutenberg post_content for one target and returns a compact parsed block tree. This also reports the Block Editor Queue runtime plus curl SSE/poll URLs so agents can ask the user to open the queue page before queueing static/native block changes. This does not read queued pending block_spec data; if a non-terminal Gutenberg queue item exists for the target, pending_gutenberg_change summarizes it separately. The tree is not a block_spec: block attributes come only from the block comment, so text, links and image sources stored in block markup are omitted. Do not send it back to gutenberg-add-pending-change.',
+        'Reads the live saved Gutenberg post_content for one target and returns a compact parsed block tree. This also reports the Block Editor Queue runtime plus curl SSE/poll URLs so agents can ask the user to open the queue page before queueing static/native block changes. This does not read queued pending block_spec data; if a non-terminal Gutenberg queue item exists for the target, pending_gutenberg_change summarizes it separately. The tree is not a block_spec: block attributes come only from the block comment, so text, links and image sources stored in block markup are omitted. Do not send it back to gutenberg-add-pending-change. content_hash identifies the live content that was read: pass it as expected_content_hash to gutenberg-add-pending-change so the change is refused if the target was edited after this read.',
         domain: 'novamira',
     ),
     'category' => 'gutenberg',
@@ -61,6 +61,14 @@ wp_register_ability('novamira/gutenberg-get-content', [
             'target_title' => ['type' => 'string'],
             'live_content_only' => ['type' => 'boolean'],
             'roundtrip_safe' => ['type' => 'boolean'],
+            'content_hash' => [
+                'type' => 'string',
+                'description' => 'SHA-256 of the live post_content that was read. Pass it as expected_content_hash to gutenberg-add-pending-change.',
+            ],
+            'modified_gmt' => [
+                'type' => 'string',
+                'description' => 'Last modification time of the target in GMT (Y-m-d H:i:s).',
+            ],
             'blocks' => ['type' => 'array'],
             'pending_gutenberg_change' => ['type' => 'object'],
             'finalizer_runtime' => ['type' => 'object'],
@@ -74,7 +82,7 @@ wp_register_ability('novamira/gutenberg-get-content', [
         'show_in_rest' => true,
         'mcp' => ['public' => true],
         'annotations' => [
-            'instructions' => 'The returned blocks are not a block_spec: they omit content stored in block markup, and blocks deeper than max_depth. When queueing a change, send every block with its full content. Reads only the saved live post_content. At the start of Gutenberg work, check finalizer_runtime: if online is false, ask the user to open dashboard_url and keep the Block Editor Queue page open while you work. Use finalizer_runtime.sse_url with curl -N, or finalizer_runtime.poll_url with curl, to check whether the page is open instead of repeatedly calling MCP abilities. If pending_gutenberg_change is present, do not assume the queued intended content is live; inspect/finalize that batch first.',
+            'instructions' => 'The returned blocks are not a block_spec: they omit content stored in block markup, and blocks deeper than max_depth. When queueing a change, send every block with its full content. Reads only the saved live post_content. At the start of Gutenberg work, check finalizer_runtime: if online is false, ask the user to open dashboard_url and keep the Block Editor Queue page open while you work. Use finalizer_runtime.sse_url with curl -N, or finalizer_runtime.poll_url with curl, to check whether the page is open instead of repeatedly calling MCP abilities. If pending_gutenberg_change is present, do not assume the queued intended content is live; inspect/finalize that batch first. Read right before composing a change, and pass content_hash as expected_content_hash to gutenberg-add-pending-change: if the user edited the target after this read, the change is refused instead of overwriting their edits.',
             'readonly' => true,
             'destructive' => false,
             'idempotent' => true,
@@ -106,6 +114,8 @@ function gutenberg_get_content(array $input): array|WP_Error
         'target_title' => target_title($target),
         'live_content_only' => true,
         'roundtrip_safe' => false,
+        'content_hash' => content_hash($target->post_content),
+        'modified_gmt' => $target->post_modified_gmt,
         'blocks' => gutenberg_shape_parsed_blocks($blocks, $max_depth, $options),
         'pending_gutenberg_change' => pending_summary_for_target($target->ID, $target_type),
         'finalizer_runtime' => finalizer_runtime_status(),

@@ -532,6 +532,7 @@ function gutenberg_finalizer_script(): string
             const blockRegistrationTimeoutMs = Number( config.blockRegistrationTimeoutMs || 30000 );
             let leaseOwner = '';
             let isRunning = false;
+            let batchStopped = false;
             let dashboardPollRunning = false;
             let editorFrameUrl = '';
             let editorFrameLoadPromise = Promise.resolve();
@@ -1279,6 +1280,7 @@ function gutenberg_finalizer_script(): string
             // The notice element only receives textContent, so the batch error is rendered as
             // plain text and never interpreted as markup.
             const reportBatchFailure = ( batch, fallbackMessage, error = null ) => {
+                batchStopped = true;
                 const message = batchErrorMessage( batch, fallbackMessage );
                 setProgress( 'Something needs attention. Return to the agent.' );
                 setNotice( 'error', message );
@@ -1309,6 +1311,8 @@ function gutenberg_finalizer_script(): string
                 }
 
                 isRunning = true;
+                batchStopped = false;
+                let currentItemId = null;
                 fallbackWarning = '';
                 try {
                     clearNotice();
@@ -1333,6 +1337,7 @@ function gutenberg_finalizer_script(): string
                         }
 
                         const item = next.item;
+                        currentItemId = item.item_id;
                         setProgress(
                             total > 1
                                 ? `Working on queued Gutenberg changes (${ processed + 1 } of ${ total })...`
@@ -1369,6 +1374,7 @@ function gutenberg_finalizer_script(): string
                                     serialization_runtime_reason: result.serializationRuntimeReason,
                                 },
                             } );
+                            currentItemId = null;
                             processed += 1;
                             if ( completed.done ) {
                                 finalNotice( completed.batch );
@@ -1420,6 +1426,15 @@ function gutenberg_finalizer_script(): string
                         }
                     }
                 } catch ( error ) {
+                    batchStopped = true;
+                    if ( currentItemId ) {
+                        try {
+                            const message = error && error.message ? error.message : String( error );
+                            await failCurrentItem( currentItemId, [ { message } ], message );
+                        } catch ( reportError ) {
+                            // Keep the original failure visible even if the server cannot be reached.
+                        }
+                    }
                     setNotice( 'error', 'The queue stopped. Return to the agent.' );
                     setProgress( 'Something needs attention. Return to the agent.' );
                     logError( 'The queue stopped.', error );
@@ -1444,6 +1459,9 @@ function gutenberg_finalizer_script(): string
                         method: 'POST',
                     } );
                     if ( next.done || ! next.claim || ! next.claim.batch ) {
+                        if ( batchStopped ) {
+                            return;
+                        }
                         clearNotice();
                         setProgress( 'Nothing to do. The queue is ready.' );
                         return;
