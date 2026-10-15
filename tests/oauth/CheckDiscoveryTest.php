@@ -6,6 +6,13 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 
+if (!function_exists('add_action')) {
+    function add_action(string $hook, callable|string $callback, int $priority = 10, int $accepted_args = 1): bool
+    {
+        return true;
+    }
+}
+
 if (!defined('ABSPATH')) {
     define('ABSPATH', '/');
 }
@@ -148,6 +155,72 @@ final class CheckDiscoveryTest extends TestCase
     public function testAllDocumentsPresentPasses(): void
     {
         self::assertSame('ok', $this->run_discovery($this->valid_map()));
+    }
+
+    public function testPhpOutputGetsItsOwnDiagnosisWithoutExposingTheBody(): void
+    {
+        $map = $this->valid_map();
+        $map[self::PR_APPEND]['body'] = '<br /><b>Deprecated</b>: private-path-and-secret<br />' . $map[self::PR_APPEND]['body'];
+        $result = $this->run_check($map);
+        self::assertSame('fail', $result['status']);
+        self::assertStringContainsString('PHP diagnostic output', $result['message']);
+        self::assertStringContainsString('keeping error logging enabled', $result['remedy']);
+        self::assertStringNotContainsString('private-path-and-secret', implode(' ', $result));
+        self::assertStringNotContainsString('firewall', $result['remedy']);
+    }
+
+    public function testCachedPhpOutputReportsBothProblemsAndPreservesHeaders(): void
+    {
+        $map = $this->valid_map();
+        $map[self::PR_APPEND]['body'] = 'PHP Warning: private details' . $map[self::PR_APPEND]['body'];
+        $map[self::PR_APPEND]['headers']['X-Kinsta-Cache'] = 'HIT';
+        $GLOBALS['novamira_test_http'] = $map;
+        $headers = [];
+        $result = check_discovery($headers);
+        self::assertSame('HIT', $headers['x-kinsta-cache']);
+        self::assertStringContainsString('PHP diagnostic output', $result['message']);
+        self::assertStringContainsString('served from cache (x-kinsta-cache)', $result['message']);
+        self::assertStringContainsString('Purge the cached discovery URLs', $result['remedy']);
+        self::assertStringContainsString('PHP error log', $result['remedy']);
+    }
+
+    public function testCached404IsNotMisdiagnosedAsPhpOutput(): void
+    {
+        $map = $this->valid_map();
+        $map[self::PR_APPEND] = ['code' => 404, 'content-type' => 'text/html', 'body' => 'Page not found', 'headers' => ['x-kinsta-cache' => 'HIT']];
+        $result = $this->run_check($map);
+        self::assertSame('fail', $result['status']);
+        self::assertStringContainsString('HTTP 404', $result['message']);
+        self::assertStringContainsString('served from cache', $result['message']);
+        self::assertStringNotContainsString('PHP diagnostic output', $result['message']);
+    }
+
+    public function testMalformedJsonWithoutPhpOutputIsReportedPrecisely(): void
+    {
+        $map = $this->valid_map();
+        $map[self::PR_APPEND]['body'] = '{broken';
+        $map[self::PR_APPEND]['headers']['x-kinsta-cache'] = 'BYPASS';
+        $result = $this->run_check($map);
+        self::assertSame('fail', $result['status']);
+        self::assertStringContainsString('not a JSON object', $result['message']);
+        self::assertStringNotContainsString('served from cache', $result['message']);
+        self::assertStringNotContainsString('PHP diagnostic output', $result['message']);
+    }
+
+    public function testHtmlResponseIsNotAutomaticallyBlamedOnACache(): void
+    {
+        $map = $this->valid_map();
+        $map[self::PR_APPEND] = ['code' => 200, 'content-type' => 'text/html', 'body' => '<html>Sign in</html>', 'headers' => []];
+        $result = $this->run_check($map);
+        self::assertStringContainsString('Content-Type is not application/json', $result['message']);
+        self::assertStringNotContainsString('served from cache', $result['message']);
+    }
+
+    public function testPhpWordsInsideValidMetadataAreNotTreatedAsDiagnosticOutput(): void
+    {
+        $map = $this->valid_map();
+        $map[self::PR_APPEND] = $this->json(['resource' => self::RESOURCE, 'description' => 'Warning: <b>Deprecated</b>']);
+        self::assertSame('ok', $this->run_discovery($map));
     }
 
     public function testContentTypeWithoutCharsetIsAccepted(): void

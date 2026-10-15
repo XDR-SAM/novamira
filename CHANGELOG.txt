@@ -1,6 +1,7 @@
 Unreleased
 * Tweak: AI agents and Novamira HQ can now tell whether Read Mode is on for a site.
 * Fix: Older AI client connections now keep reaching Novamira when another plugin uses the same server address. Agents using the older address also receive the recommended connection URL to share with the user.
+* Fix: Troubleshoot now distinguishes error notices, unexpected responses and cached replies when a connection check fails, instead of pointing every invalid response at a cache or firewall.
 
 v1.12.9 - 2026/10/14
 * Tweak: Novamira is now ready for Read Mode, a production ready Novamira Pro feature that lets an AI agent inspect a site without Novamira's write abilities. It requires Novamira Pro 1.12.0 or newer. The new Read Mode page under Novamira and `wp novamira read-mode` show whether it is on and turn it off. While it is on, only read abilities stay available, Novamira Visual does not work, the admin bar says Read Mode, the Abilities Hub lists only the read abilities and the Features page cannot be changed. Read Mode is not a security feature.

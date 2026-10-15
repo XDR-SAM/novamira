@@ -675,7 +675,8 @@ function check_discovery(array &$headers): array
 /**
  * Fetch one discovery URL and validate it: HTTP 200, an `application/json` content type (parameters
  * such as charset ignored), a JSON body, and the identifying field carrying this site's exact
- * resource or issuer. On success the response headers are captured for the environment check.
+ * resource or issuer. Failed responses carry useful cache/edge evidence too, so their headers are
+ * captured before validation.
  *
  * @param array{url: string, field: string, expected: string, requirement: string, group: string, label: string} $probe
  * @param array<string, string> $headers
@@ -703,6 +704,7 @@ function probe_discovery_document(array $probe, string $label, array &$headers):
             ),
         ];
     }
+    $headers = normalize_headers(wp_remote_retrieve_headers($response));
     $code = (int) wp_remote_retrieve_response_code($response);
     if ($code >= 300 && $code < 400) {
         return ['ok' => false, 'failure' => discovery_redirect_failure($probe, $label, $code, $response)];
@@ -715,26 +717,7 @@ function probe_discovery_document(array $probe, string $label, array &$headers):
         if ($htaccess_failure !== null) {
             return ['ok' => false, 'failure' => $htaccess_failure];
         }
-        return [
-            'ok' => false,
-            'failure' => fail(
-                'discovery',
-                $label,
-                sprintf(
-                    /* translators: 1: discovery URL, 2: HTTP status code */
-                    __(
-                        '%1$s answered HTTP %2$d, or without an application/json body. AI clients cannot find the sign-in endpoints. A cache or firewall layer may be intercepting the URL.',
-                        domain: 'novamira',
-                    ),
-                    $probe['url'],
-                    $code,
-                ),
-                __(
-                    'Exclude the /.well-known/oauth-* paths from page caching and firewall challenges, then run these checks again.',
-                    domain: 'novamira',
-                ),
-            ),
-        ];
+        return ['ok' => false, 'failure' => discovery_response_failure($probe['url'], $label, $response)];
     }
     // The document must be ours: the identifying field present AND carrying the exact resource or
     // issuer this site advertises, so a stray OAuth document from another plugin is caught.
@@ -756,8 +739,113 @@ function probe_discovery_document(array $probe, string $label, array &$headers):
             ),
         ];
     }
-    $headers = normalize_headers(wp_remote_retrieve_headers($response));
     return ['ok' => true, 'failure' => null];
+}
+
+/**
+ * Report what the response actually establishes. A PHP diagnostic, a cached 404 and an HTML page
+ * require different fixes. Never echo the response body: it may contain private paths or secrets.
+ *
+ * @param array<string, mixed> $response
+ * @return array{id: string, status: string, label: string, message: string, remedy: string, action: string, copy: string}
+ */
+function discovery_response_failure(string $url, string $label, array $response): array
+{
+    $code = (int) wp_remote_retrieve_response_code($response);
+    $type = discovery_media_type(wp_remote_retrieve_header($response, header: 'content-type'));
+    $prefix = strip_tags(substr(wp_remote_retrieve_body($response), offset: 0, length: 4096));
+    [$detail, $remedy] = discovery_response_problem($code, $type, $prefix);
+
+    $hits = discovery_cache_hits(normalize_headers(wp_remote_retrieve_headers($response)));
+    if ($hits !== []) {
+        $detail = implode(' ', [
+            $detail,
+            sprintf(
+                /* translators: %s: names of HTTP headers reporting a cache hit */
+                __('This response was served from cache (%s).', domain: 'novamira'),
+                implode(', ', $hits),
+            ),
+        ]);
+        $remedy .=
+            ' '
+            . __(
+                'Purge the cached discovery URLs and exclude them from page caching, including their trailing-slash variants. Then rerun diagnostics on the original URLs.',
+                domain: 'novamira',
+            );
+    }
+
+    return fail(
+        'discovery',
+        $label,
+        sprintf(
+            /* translators: 1: discovery URL, 2: HTTP status code, 3: response diagnosis */
+            __('%1$s answered HTTP %2$d. %3$s', domain: 'novamira'),
+            $url,
+            $code,
+            $detail,
+        ),
+        $remedy,
+    );
+}
+
+/** @return array{string, string} Diagnosis and remedy, without any untrusted response content. */
+function discovery_response_problem(int $code, string $type, string $prefix): array
+{
+    $php_output =
+        preg_match(
+            '/\A\s*(?:PHP\s+)?(?:Deprecated|Warning|Notice|Fatal error|Parse error|Recoverable fatal error|Strict Standards):/i',
+            $prefix,
+        ) === 1;
+
+    if ($php_output) {
+        $detail = __(
+            'PHP diagnostic output precedes the OAuth metadata, so the response is not valid JSON.',
+            domain: 'novamira',
+        );
+        $remedy = __(
+            'Check the PHP error log for the plugin or theme producing this output. Fix that error, or disable displaying PHP errors in HTTP responses while keeping error logging enabled.',
+            domain: 'novamira',
+        );
+        return [$detail, $remedy];
+    }
+    if ($code !== 200) {
+        $detail = __('The discovery endpoint did not return HTTP 200.', domain: 'novamira');
+        $remedy = __(
+            'Check that this exact URL reaches WordPress and is not replaced by an error page. Use the response status and hosting logs to identify the failing layer.',
+            domain: 'novamira',
+        );
+        return [$detail, $remedy];
+    }
+    if ($type !== 'application/json') {
+        $detail = __('The response Content-Type is not application/json.', domain: 'novamira');
+        $remedy = __(
+            'Check whether a plugin, redirect or hosting rule is serving a page instead of the OAuth metadata at this URL.',
+            domain: 'novamira',
+        );
+        return [$detail, $remedy];
+    }
+    $detail = __('The response body is not a JSON object containing OAuth metadata.', domain: 'novamira');
+    $remedy = __(
+        'Check the PHP error log and any plugin that writes output into API responses. The entire response must be valid JSON.',
+        domain: 'novamira',
+    );
+    return [$detail, $remedy];
+}
+
+/**
+ * @param array<string, string> $headers
+ * @return list<string>
+ */
+function discovery_cache_hits(array $headers): array
+{
+    $hits = [];
+    foreach (['x-kinsta-cache', 'cf-cache-status', 'x-cache', 'x-litespeed-cache', 'x-proxy-cache'] as $name) {
+        if (preg_match('/\bHIT\b/i', $headers[$name] ?? '') !== 1) {
+            continue;
+        }
+        $hits[] = $name;
+    }
+    return $hits;
 }
 
 /**
