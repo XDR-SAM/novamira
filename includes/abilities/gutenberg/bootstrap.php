@@ -129,9 +129,10 @@ const FINALIZER_RUNTIME_POLL_TOKEN_OPTION = 'novamira_gb_finalizer_poll_token';
 
 const FINALIZER_RUNTIME_POLL_TOKEN_BYTES = 16;
 
-const FINALIZER_RUNTIME_STALE_SECONDS = 45;
+// Allow for background tabs whose heartbeat timers run only once per minute.
+const FINALIZER_RUNTIME_STALE_SECONDS = 150;
 
-const FINALIZER_RUNTIME_TTL_SECONDS = 120;
+const FINALIZER_RUNTIME_TTL_SECONDS = 300;
 
 /** Upper bound of a compacted validation row message, hint included. */
 const VALIDATION_MESSAGE_MAX_LENGTH = 300;

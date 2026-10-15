@@ -1,4 +1,7 @@
 Unreleased
+* Fix: The Block Editor Queue now reports stopped changes and recovers abandoned batches, instead of staying stuck silently after an error.
+* Fix: Ready Block Editor Queue batches are no longer held up by a newer batch that keeps failing.
+* Fix: A Block Editor Queue page left open in a background tab is no longer reported as closed when the browser slows its heartbeat.
 * Tweak: AI agents editing a Gutenberg page can now detect that it was edited by hand after they read it, and stop instead of overwriting those edits.
 * Tweak: AI agents and Novamira HQ can now tell whether Read Mode is on for a site.
 * Fix: Older AI client connections now keep reaching Novamira when another plugin uses the same server address. Agents using the older address also receive the recommended connection URL to share with the user.

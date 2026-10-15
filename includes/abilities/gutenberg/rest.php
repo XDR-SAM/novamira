@@ -374,25 +374,28 @@ function rest_claim_next_batch(): WP_REST_Response|WP_Error
 {
     mark_stale_drafts();
 
-    foreach (get_batches([STATUS_READY, STATUS_FAILED], posts_per_page: 50) as $batch) {
-        $batch = refresh_batch_runtime_state($batch);
-        $claim = claim_batch($batch->ID);
-        if (!is_wp_error($claim)) {
-            return new WP_REST_Response([
-                'done' => false,
-                'claim' => $claim,
-            ]);
-        }
+    // Query ready work separately so newer retries cannot fill its candidate window.
+    foreach ([[STATUS_READY], [STATUS_FAILED, STATUS_RUNNING]] as $statuses) {
+        foreach (get_batches($statuses, posts_per_page: 50) as $batch) {
+            $batch = refresh_batch_runtime_state($batch);
+            $claim = claim_batch($batch->ID);
+            if (!is_wp_error($claim)) {
+                return new WP_REST_Response([
+                    'done' => false,
+                    'claim' => $claim,
+                ]);
+            }
 
-        if (in_array(
-            $claim->get_error_code(),
-            ['gutenberg_batch_claim_raced', 'gutenberg_batch_not_claimable'],
-            strict: true,
-        )) {
-            continue;
-        }
+            if (in_array(
+                $claim->get_error_code(),
+                ['gutenberg_batch_claim_raced', 'gutenberg_batch_not_claimable'],
+                strict: true,
+            )) {
+                continue;
+            }
 
-        return $claim;
+            return $claim;
+        }
     }
 
     return new WP_REST_Response(['done' => true]);
