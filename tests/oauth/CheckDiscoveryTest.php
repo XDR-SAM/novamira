@@ -80,6 +80,7 @@ if (!class_exists('WP_Error')) {
 if (!function_exists('wp_remote_get')) {
     function wp_remote_get(string $url, array $args = []): mixed
     {
+        $GLOBALS['novamira_test_discovery_requests'][$url] = $args;
         /** @var array<string, array<string, mixed>> $map */
         $map = $GLOBALS['novamira_test_http'] ?? [];
         if (!array_key_exists($url, $map)) {
@@ -145,16 +146,27 @@ final class CheckDiscoveryTest extends TestCase
     protected function setUp(): void
     {
         $GLOBALS['novamira_test_home'] = 'https://example.test';
+        $GLOBALS['novamira_test_discovery_requests'] = [];
     }
 
     protected function tearDown(): void
     {
-        unset($GLOBALS['novamira_test_home'], $GLOBALS['novamira_test_http']);
+        unset($GLOBALS['novamira_test_home'], $GLOBALS['novamira_test_http'], $GLOBALS['novamira_test_discovery_requests']);
     }
 
     public function testAllDocumentsPresentPasses(): void
     {
         self::assertSame('ok', $this->run_discovery($this->valid_map()));
+    }
+
+    public function testDiscoveryRequestsExplicitlyAcceptJsonWithoutFollowingRedirects(): void
+    {
+        $this->run_discovery($this->valid_map());
+        foreach ($GLOBALS['novamira_test_discovery_requests'] as $options) {
+            self::assertSame('application/json', $options['headers']['Accept']);
+            self::assertSame(0, $options['redirection']);
+        }
+        self::assertCount(4, $GLOBALS['novamira_test_discovery_requests']);
     }
 
     public function testPhpOutputGetsItsOwnDiagnosisWithoutExposingTheBody(): void

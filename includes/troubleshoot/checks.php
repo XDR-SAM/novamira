@@ -688,7 +688,16 @@ function probe_discovery_document(array $probe, string $label, array &$headers):
     // (seen on WP Engine) ship edge rules that 301 the OAuth well-known paths to the homepage;
     // following the redirect would only report "200 but not JSON", while the redirect names the
     // actual problem and its owner.
-    $response = wp_remote_get($probe['url'], http_options() + ['redirection' => 0]);
+    // WordPress recognizes JSON requests before loading plugins and keeps PHP diagnostics out of
+    // their response body. This cannot repair a previously cached response or arbitrary plugin output.
+    $response = wp_remote_get(
+        $probe['url'],
+        http_options()
+        + [
+            'redirection' => 0,
+            'headers' => ['Accept' => 'application/json'],
+        ],
+    );
     if (is_wp_error($response)) {
         return [
             'ok' => false,
